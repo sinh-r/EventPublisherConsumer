@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-ced8786d-2ff9-4a54-b5e5-cafaf293f634/styles.css">
+<script src="_ds/nocturne-ced8786d-2ff9-4a54-b5e5-cafaf293f634/_ds_bundle.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; }
+  [data-theme="dark"] {
+    --bg: #161826; --surf: #1c1e2c; --surf2: #232532; --raise: #2a2c3b;
+    --text: #e9e9ed; --muted: #9397ab; --dim: #75798c;
+    --line: rgba(233,233,237,0.13); --line-2: rgba(233,233,237,0.07);
+    --accent: #9184d9; --accent-dim: #5d5294; --accent-tint: rgba(145,132,217,0.14);
+    --green: #57b98d; --green-tint: rgba(87,185,141,0.13);
+    --amber: #d7a44f; --amber-tint: rgba(215,164,79,0.15);
+    --red: #d9736f; --red-tint: rgba(217,115,111,0.13);
+    --hover: rgba(233,233,237,0.05); --sel: rgba(145,132,217,0.16);
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --sans: "Inter", system-ui, sans-serif;
+  }
+  [data-theme="light"] {
+    --bg: #eceef7; --surf: #f7f8fd; --surf2: #ffffff; --raise: #ffffff;
+    --text: #232532; --muted: #5f6377; --dim: #82869a;
+    --line: rgba(35,37,50,0.16); --line-2: rgba(35,37,50,0.07);
+    --accent: #5d5294; --accent-dim: #796cbf; --accent-tint: rgba(93,82,148,0.11);
+    --green: #2f7d5c; --green-tint: rgba(47,125,92,0.12);
+    --amber: #8c6215; --amber-tint: rgba(140,98,21,0.14);
+    --red: #a5423e; --red-tint: rgba(165,66,62,0.11);
+    --hover: rgba(35,37,50,0.045); --sel: rgba(93,82,148,0.12);
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --sans: "Inter", system-ui, sans-serif;
+  }
+  @keyframes es-spin { to { transform: rotate(360deg); } }
+  @keyframes es-slide { 0% { background-position: 0 0; } 100% { background-position: 240px 0; } }
+  @keyframes es-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  input, button, select { font-family: inherit; }
+  input:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-dim); }
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="width: 1600px; height: 1000px; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 13px; display: flex; flex-direction: column; overflow: hidden; position: relative; -webkit-font-smoothing: antialiased;">
+
+  <!-- ─────────── LAUNCHER / CONNECTION MANAGER ─────────── -->
+  <sc-if value="{{ showLauncher }}" hint-placeholder-val="{{ true }}">
+    <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+      <div style="height: 44px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--surf);">
+        <div style="width: 13px; height: 13px; border: 1.5px solid var(--accent); border-radius: 3px;"></div>
+        <div style="font-size: 13px; font-weight: 500; letter-spacing: 0.02em;">EventScope</div>
+        <div style="color: var(--dim); font-size: 12px;">Connection manager</div>
+        <div style="flex: 1;"></div>
+        <button onClick="{{ onToggleTheme }}" style="height: 26px; padding: 0 9px; font-size: 11.5px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="background: var(--hover); color: var(--text);">{{ themeLabel }}</button>
+      </div>
+      <div style="flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0;">
+        <!-- saved connections -->
+        <div style="border-right: 1px solid var(--line); background: var(--surf); display: flex; flex-direction: column; min-height: 0;">
+          <div style="height: 38px; flex: none; display: flex; align-items: center; padding: 0 12px; gap: 8px; border-bottom: 1px solid var(--line-2);">
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--dim);">Saved connections</div>
+            <div style="flex: 1;"></div>
+            <div style="font-family: var(--mono); font-size: 11px; color: var(--dim);">{{ savedCount }}</div>
+          </div>
+          <sc-if value="{{ coldStart }}">
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center;">
+              <div style="width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px;"></div>
+              <div style="font-size: 13px;">No saved connections</div>
+              <div style="font-size: 12px; color: var(--dim); max-width: 200px; line-height: 1.5;">Add a broker to start streaming. Credentials stay on this machine.</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ hasSaved }}">
+            <div style="flex: 1; overflow: auto; padding: 6px 0;">
+              <sc-for list="{{ savedGroups }}" as="grp" hint-placeholder-count="3">
+                <div style="padding: 8px 12px 4px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim);">{{ grp.label }}</div>
+                <sc-for list="{{ grp.items }}" as="conn" hint-placeholder-count="2">
+                  <div onClick="{{ conn.onPick }}" data-sel="{{ conn.sel }}" style="padding: 7px 12px; cursor: pointer; border-left: 2px solid transparent; display: flex; flex-direction: column; gap: 2px;" style-hover="background: var(--hover);">
+                    <div style="display: flex; align-items: center; gap: 7px;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; flex: none; background: {{ conn.dot }};"></span>
+                      <span style="font-size: 12.5px; font-weight: 500;">{{ conn.name }}</span>
+                      <span style="flex: 1;"></span>
+                      <span style="font-family: var(--mono); font-size: 10.5px; color: var(--dim);">{{ conn.used }}</span>
+                    </div>
+                    <div style="font-family: var(--mono); font-size: 11px; color: var(--muted); padding-left: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ conn.endpoint }}</div>
+                  </div>
+                </sc-for>
+              </sc-for>
+            </div>
+          </sc-if>
+          <div style="flex: none; padding: 8px; border-top: 1px solid var(--line-2); display: flex; gap: 6px;">
+            <button onClick="{{ onNewKafka }}" style="flex: 1; height: 28px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">New connection</button>
+          </div>
+        </div>
+        <!-- right pane -->
+        <div style="display: flex; flex-direction: column; min-height: 0; overflow: auto;">
+          <sc-if value="{{ coldStart }}">
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;">
+              <div style="text-align: center; display: flex; flex-direction: column; gap: 6px;">
+                <div style="font-size: 20px; font-weight: 500; letter-spacing: -0.01em;">Connect a broker</div>
+                <div style="font-size: 12.5px; color: var(--dim);">Pick a broker type to configure a connection.</div>
+              </div>
+              <div style="display: flex; gap: 12px;">
+                <button onClick="{{ onNewKafka }}" style="width: 168px; height: 104px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer;" style-hover="border-color: var(--accent); background: var(--accent-tint);">
+                  <span style="font-family: var(--mono); font-size: 17px; color: var(--accent);">K</span>
+                  <span style="font-size: 12.5px;">Kafka</span>
+                  <span style="font-size: 11px; color: var(--dim); font-family: var(--mono);">SASL · partitions</span>
+                </button>
+                <button onClick="{{ onNewAsb }}" style="width: 168px; height: 104px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer;" style-hover="border-color: var(--accent); background: var(--accent-tint);">
+                  <span style="font-family: var(--mono); font-size: 17px; color: var(--accent);">A</span>
+                  <span style="font-size: 12.5px;">Azure Service Bus</span>
+                  <span style="font-size: 11px; color: var(--dim); font-family: var(--mono);">peek-lock · sessions</span>
+                </button>
+                <button onClick="{{ onNewSqs }}" style="width: 168px; height: 104px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer;" style-hover="border-color: var(--accent); background: var(--accent-tint);">
+                  <span style="font-family: var(--mono); font-size: 17px; color: var(--accent);">S</span>
+                  <span style="font-size: 12.5px;">AWS SQS</span>
+                  <span style="font-size: 11px; color: var(--red); font-family: var(--mono);">destructive read</span>
+                </button>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ hasSaved }}">
+            <div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 16px; max-width: 720px;">
+              <div style="display: flex; align-items: baseline; gap: 10px;">
+                <div style="font-size: 17px; font-weight: 500;">{{ pickedName }}</div>
+                <div style="font-family: var(--mono); font-size: 11px; color: var(--dim);">{{ pickedKind }}</div>
+                <div style="flex: 1;"></div>
+                <button onClick="{{ onOpenPicked }}" style="height: 28px; padding: 0 12px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">Open <span style="font-family: var(--mono); font-size: 10.5px; opacity: 0.7;">⏎</span></button>
+              </div>
+              <div style="height: 1px; background: linear-gradient(to right, var(--line), transparent);"></div>
+              <sc-for list="{{ pickedFields }}" as="f" hint-placeholder-count="6">
+                <div style="display: grid; grid-template-columns: 190px 1fr; gap: 12px; align-items: center;">
+                  <label style="font-size: 12px; color: var(--muted);">{{ f.label }}</label>
+                  <sc-if value="{{ f.isSelect }}">
+                    <div style="height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px; font-family: var(--mono); font-size: 12px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; color: var(--text);">
+                      <span>{{ f.value }}</span><span style="color: var(--dim); font-size: 9px;">▾</span>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ f.isText }}">
+                    <div style="height: 30px; display: flex; align-items: center; padding: 0 9px; font-family: var(--mono); font-size: 12px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px;">{{ f.value }}</div>
+                  </sc-if>
+                </div>
+              </sc-for>
+              <sc-if value="{{ pickedIsSqs }}">
+                <div style="padding: 9px 11px; background: var(--red-tint); border: 1px solid var(--red); border-radius: 6px; font-size: 12px; color: var(--text); line-height: 1.5;">Reads from SQS are destructive: received messages become invisible to other consumers for the visibility timeout. There is no non-destructive read.</div>
+              </sc-if>
+              <div style="display: flex; align-items: center; gap: 10px; padding-top: 4px;">
+                <button onClick="{{ onTest }}" style="height: 30px; padding: 0 12px; font-size: 12px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="background: var(--hover);">Test connection</button>
+                <sc-if value="{{ testBusy }}">
+                  <div style="display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted);">
+                    <span style="width: 11px; height: 11px; border: 1.5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: es-spin 0.7s linear infinite;"></span>
+                    <span style="font-family: var(--mono); font-size: 11.5px;">handshaking…</span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ testOk }}">
+                  <div style="font-family: var(--mono); font-size: 11.5px; color: var(--green);">✓ {{ testOkText }}</div>
+                </sc-if>
+                <sc-if value="{{ testFail }}">
+                  <div style="font-family: var(--mono); font-size: 11.5px; color: var(--red);">✕ SASL handshake failed: authentication error</div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+      <div style="height: 26px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid var(--line); background: var(--surf); font-family: var(--mono); font-size: 11px; color: var(--dim);">
+        <span>{{ statusLauncher }}</span>
+        <span style="flex: 1;"></span>
+        <span>⌘N new · ⏎ open</span>
+        <span style="color: var(--line);">·</span>
+        <span onClick="{{ onToggleDev }}" style="cursor: pointer; color: var(--dim);" style-hover="color: var(--text);">states ▴</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── WORKSPACE ─────────── -->
+  <sc-if value="{{ showWorkspace }}">
+    <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+
+      <!-- tab strip -->
+      <div style="height: 36px; flex: none; display: flex; align-items: stretch; background: var(--bg); border-bottom: 1px solid var(--line);">
+        <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="3">
+          <div onClick="{{ tab.onPick }}" style="display: flex; align-items: center; gap: 7px; padding: 0 11px; cursor: pointer; border-right: 1px solid var(--line-2); font-size: 12.5px; background: {{ tab.bg }}; border-bottom: 2px solid {{ tab.edge }}; color: {{ tab.fg }};" style-hover="background: var(--hover);">
+            <span style="width: 6px; height: 6px; border-radius: 50%; flex: none; background: {{ tab.dot }};"></span>
+            <span>{{ tab.name }}</span>
+            <span onClick="{{ tab.onClose }}" style="width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--dim); font-size: 12px;" style-hover="background: var(--hover); color: var(--text);">×</span>
+          </div>
+        </sc-for>
+        <div onClick="{{ onNewTab }}" style="width: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); font-size: 15px; border-right: 1px solid var(--line-2);" style-hover="background: var(--hover); color: var(--text);">+</div>
+        <div style="flex: 1;"></div>
+        <div onClick="{{ onOpenSettings }}" style="padding: 0 11px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-size: 12px;" style-hover="color: var(--text);">Settings</div>
+        <div onClick="{{ onToggleTheme }}" style="padding: 0 11px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-size: 12px; border-left: 1px solid var(--line-2);" style-hover="color: var(--text);">{{ themeLabel }}</div>
+      </div>
+
+      <!-- connection toolbar -->
+      <div style="height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--surf); border-bottom: 1px solid var(--line);">
+        <div style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 9px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; cursor: pointer; min-width: 236px;" style-hover="border-color: var(--accent-dim);">
+          <span style="font-family: var(--mono); font-size: 12px; color: var(--accent); width: 12px; text-align: center;">{{ brokerGlyph }}</span>
+          <span style="font-family: var(--mono); font-size: 12.5px;">{{ entityName }}</span>
+          <span style="flex: 1;"></span>
+          <span style="color: var(--dim); font-size: 9px;">▾</span>
+        </div>
+        <sc-if value="{{ showPartition }}">
+          <div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="border-color: var(--accent-dim);">
+            <span style="font-size: 11px; color: var(--dim);">part</span>
+            <span style="font-family: var(--mono); font-size: 12.5px;">{{ partitionLabel }}</span>
+            <span style="color: var(--dim); font-size: 9px;">▾</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ showSubscription }}">
+          <div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="border-color: var(--accent-dim);">
+            <span style="font-size: 11px; color: var(--dim);">sub</span>
+            <span style="font-family: var(--mono); font-size: 12.5px;">{{ subscriptionLabel }}</span>
+            <span style="color: var(--dim); font-size: 9px;">▾</span>
+          </div>
+        </sc-if>
+
+        <!-- read mode -->
+        <div title="{{ peekTooltip }}" style="display: flex; height: 30px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; background: var(--surf2);">
+          <div onClick="{{ onPeek }}" title="{{ peekTooltip }}" style="display: flex; align-items: center; padding: 0 12px; font-size: 12px; cursor: {{ peekCursor }}; color: {{ peekFg }}; background: {{ peekBg }}; box-shadow: {{ peekRing }}; opacity: {{ peekOpacity }};">Peek</div>
+          <div onClick="{{ onConsume }}" style="display: flex; align-items: center; padding: 0 12px; font-size: 12px; cursor: pointer; border-left: 1px solid var(--line); color: {{ consumeFg }}; background: {{ consumeBg }}; box-shadow: {{ consumeRing }};">Consume</div>
+        </div>
+
+        <button onClick="{{ onToggleRun }}" style="height: 30px; padding: 0 13px; display: flex; align-items: center; gap: 8px; font-size: 12.5px; background: transparent; border: 1px solid {{ runEdge }}; border-radius: 5px; color: {{ runEdge }}; cursor: pointer;" style-hover="background: var(--hover);">
+          <sc-if value="{{ connecting }}">
+            <span style="width: 10px; height: 10px; border: 1.5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: es-spin 0.7s linear infinite;"></span>
+          </sc-if>
+          <span>{{ runLabel }}</span>
+          <span style="font-family: var(--mono); font-size: 10.5px; opacity: 0.65;">{{ runKey }}</span>
+        </button>
+
+        <button onClick="{{ onTogglePublisher }}" style="height: 30px; padding: 0 11px; display: flex; align-items: center; gap: 7px; font-size: 12.5px; background: {{ pubBg }}; border: 1px solid var(--line); border-radius: 5px; color: var(--text); cursor: pointer;" style-hover="background: var(--hover);">
+          <span>Publish</span>
+          <span style="font-family: var(--mono); font-size: 10.5px; color: var(--dim);">⌃2</span>
+        </button>
+
+        <sc-if value="{{ bannerDot }}">
+          <span title="Destructive read active" style="width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none;"></span>
+        </sc-if>
+
+        <div style="flex: 1;"></div>
+
+        <sc-if value="{{ saturated }}">
+          <div onClick="{{ onOpenSettings }}" style="height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 9px; background: var(--amber-tint); border: 1px solid var(--amber); border-radius: 4px; cursor: pointer; font-family: var(--mono); font-size: 11.5px; color: var(--amber);" style-hover="background: var(--hover);">
+            <span>⚠</span><span>{{ droppedText }} not displayed</span>
+          </div>
+        </sc-if>
+        <div style="font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; letter-spacing: -0.01em;">{{ throughput }}</div>
+      </div>
+
+      <!-- warning banner -->
+      <sc-if value="{{ showBanner }}">
+        <div style="height: 36px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--red-tint); border-bottom: 1px solid var(--red);">
+          <span style="color: var(--red); font-size: 12px;">⚠</span>
+          <span style="font-size: 12.5px; line-height: 1.3;">Reading from SQS makes messages invisible to other consumers for the visibility timeout. There is no non-destructive read.</span>
+          <span style="flex: 1;"></span>
+          <span onClick="{{ onDismissBanner }}" style="width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 13px;" style-hover="background: var(--hover); color: var(--text);">×</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ showErrorBanner }}">
+        <div style="height: 36px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--red-tint); border-bottom: 1px solid var(--red);">
+          <span style="color: var(--red); font-size: 12px;">✕</span>
+          <span style="font-family: var(--mono); font-size: 12px;">Broker unreachable — kafka: connect ETIMEDOUT 10.4.22.18:9093 (attempt 3)</span>
+          <span style="flex: 1;"></span>
+          <button onClick="{{ onRetry }}" style="height: 24px; padding: 0 10px; font-size: 11.5px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer;" style-hover="background: var(--hover);">Retry</button>
+        </div>
+      </sc-if>
+
+      <!-- search bar -->
+      <div style="height: 44px; flex: none; display: flex; align-items: center; gap: 9px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); position: relative;">
+        <div style="flex: 1; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; background: var(--surf); border: 1px solid var(--line); border-radius: 5px;">
+          <span style="color: var(--dim); font-size: 12px;">⌕</span>
+          <input value="{{ query }}" onChange="{{ onQuery }}" ref="{{ searchRef }}" placeholder="Search messages…  (⌘F)" style="flex: 1; height: 22px; border: 0; background: transparent; color: var(--text); font-family: var(--mono); font-size: 12.5px; outline: none;">
+          <sc-if value="{{ hasQuery }}">
+            <span onClick="{{ onClearQuery }}" style="color: var(--dim); cursor: pointer; font-size: 12px;" style-hover="color: var(--text);">×</span>
+          </sc-if>
+        </div>
+        <div style="display: flex; height: 30px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; background: var(--surf);">
+          <sc-for list="{{ scopes }}" as="s" hint-placeholder-count="4">
+            <div onClick="{{ s.onPick }}" title="{{ s.hint }}" style="display: flex; align-items: center; padding: 0 11px; font-size: 12px; cursor: pointer; border-left: 1px solid var(--line-2); color: {{ s.fg }}; background: {{ s.bg }}; box-shadow: {{ s.ring }};">{{ s.label }}</div>
+          </sc-for>
+        </div>
+        <div style="font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 152px; text-align: right;">{{ resultCount }}</div>
+        <sc-if value="{{ searchRunning }}">
+          <div style="position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--line-2);">
+            <div style="height: 2px; width: {{ searchPct }}; background: var(--accent);"></div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- grid -->
+      <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); overflow: hidden;">
+        <div style="flex: none; display: grid; grid-template-columns: {{ gridCols }}; height: 24px; align-items: center; background: var(--surf); border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); position: sticky; top: 0;">
+          <sc-for list="{{ columns }}" as="col" hint-placeholder-count="6">
+            <div style="padding: 0 8px; display: flex; align-items: center; gap: 5px; justify-content: {{ col.align }}; border-right: 1px solid var(--line-2); overflow: hidden; white-space: nowrap;">
+              <sc-if value="{{ col.pinned }}">
+                <span style="color: var(--accent); font-size: 10px;">⚲</span>
+              </sc-if>
+              <span>{{ col.label }}</span>
+              <sc-if value="{{ col.pinned }}">
+                <span onClick="{{ col.onUnpin }}" style="cursor: pointer; color: var(--dim); font-size: 11px;" style-hover="color: var(--text);">×</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <sc-if value="{{ gridSkeleton }}">
+          <div style="flex: 1; padding: 6px 0;">
+            <sc-for list="{{ skeletonRows }}" as="sk" hint-placeholder-count="10">
+              <div style="height: 26px; display: flex; align-items: center; gap: 10px; padding: 0 8px;">
+                <div style="height: 8px; width: {{ sk.w1 }}; border-radius: 2px; background: var(--line-2);"></div>
+                <div style="height: 8px; width: {{ sk.w2 }}; border-radius: 2px; background: var(--line-2);"></div>
+                <div style="height: 8px; flex: 1; border-radius: 2px; background: var(--line-2); opacity: 0.6;"></div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ gridEmpty }}">
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;">
+            <div style="width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 6px;"></div>
+            <div style="font-size: 13px;">No messages match “{{ query }}”</div>
+            <div style="font-size: 12px; color: var(--dim);">Live scope only searches what is in memory.</div>
+            <button onClick="{{ onDeepSearch }}" style="margin-top: 4px; height: 27px; padding: 0 11px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">Search all 1.84 GB (deep)</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ gridRowsVisible }}">
+          <div style="flex: 1; overflow: auto; min-height: 0;">
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="26">
+              <div onClick="{{ r.onPick }}" style="display: grid; grid-template-columns: {{ gridCols }}; height: 26px; align-items: center; font-family: var(--mono); font-size: 12.5px; cursor: default; background: {{ r.bg }}; opacity: {{ r.opacity }}; border-left: 2px solid {{ r.edge }}; box-shadow: {{ r.ring }};" style-hover="background: var(--hover);">
+                <div style="padding: 0 8px; color: var(--muted); white-space: nowrap; overflow: hidden;">{{ r.time }}</div>
+                <div style="padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <sc-for list="{{ r.subjSegs }}" as="sg" hint-placeholder-count="1">
+                    <sc-if value="{{ sg.hit }}"><span style="background: var(--amber-tint); color: var(--amber); border-radius: 2px;">{{ sg.t }}</span></sc-if>
+                    <sc-if value="{{ sg.plain }}"><span>{{ sg.t }}</span></sc-if>
+                  </sc-for>
+                </div>
+                <div style="padding: 0 8px; color: var(--muted); white-space: nowrap; overflow: hidden;">{{ r.corr }}</div>
+                <div style="padding: 0 8px; text-align: right; white-space: nowrap; color: {{ r.sizeFg }};">{{ r.size }}</div>
+                <sc-if value="{{ showPartCol }}">
+                  <div style="padding: 0 8px; text-align: right; color: var(--muted);">{{ r.part }}</div>
+                </sc-if>
+                <sc-if value="{{ pinnedOn }}">
+                  <div style="padding: 0 8px; color: var(--muted); white-space: nowrap; overflow: hidden;">{{ r.pinnedVal }}</div>
+                </sc-if>
+                <div style="padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-style: {{ r.previewStyle }};">
+                  <sc-for list="{{ r.prevSegs }}" as="pg" hint-placeholder-count="1">
+                    <sc-if value="{{ pg.hit }}"><span style="background: var(--amber-tint); color: var(--amber); border-radius: 2px;">{{ pg.t }}</span></sc-if>
+                    <sc-if value="{{ pg.plain }}"><span>{{ pg.t }}</span></sc-if>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- detail pane -->
+      <sc-if value="{{ detailOpen }}">
+        <div onMouseDown="{{ onDragDetail }}" style="height: 4px; flex: none; cursor: row-resize; background: var(--line-2); border-top: 1px solid var(--line);" style-hover="background: var(--accent-tint);"></div>
+        <div style="flex: none; height: {{ detailH }}; display: flex; flex-direction: column; background: var(--surf); min-height: 0;">
+          <div style="height: 34px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line);">
+            <sc-for list="{{ detailTabs }}" as="dt" hint-placeholder-count="3">
+              <div onClick="{{ dt.onPick }}" style="height: 34px; display: flex; align-items: center; padding: 0 11px; font-size: 12.5px; cursor: pointer; color: {{ dt.fg }}; border-bottom: 2px solid {{ dt.edge }};" style-hover="color: var(--text);">{{ dt.label }}</div>
+            </sc-for>
+            <div style="flex: 1;"></div>
+            <sc-for list="{{ detailActions }}" as="da" hint-placeholder-count="3">
+              <button onClick="{{ da.onClick }}" style="height: 25px; flex: none; white-space: nowrap; padding: 0 9px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; margin-left: 6px;" style-hover="background: var(--hover);">
+                <span>{{ da.label }}</span><span style="font-family: var(--mono); font-size: 10px; color: var(--dim);">{{ da.key }}</span>
+              </button>
+            </sc-for>
+            <span onClick="{{ onCloseDetail }}" style="width: 20px; height: 20px; margin-left: 8px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 13px;" style-hover="background: var(--hover); color: var(--text);">×</span>
+          </div>
+
+          <sc-if value="{{ detailPlaceholder }}">
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; text-align: center;">
+              <div style="font-family: var(--mono); font-size: 15px; color: {{ phAccent }};">{{ phTitle }}</div>
+              <sc-if value="{{ phHasAction }}">
+                <button onClick="{{ onLoadPayload }}" style="height: 28px; padding: 0 13px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">Load payload</button>
+              </sc-if>
+              <div style="font-size: 12px; color: var(--dim); max-width: 380px; line-height: 1.5;">{{ phNote }}</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showBody }}">
+            <div style="flex: 1; overflow: auto; min-height: 0; padding: 6px 0;">
+              <sc-for list="{{ bodyLines }}" as="ln" hint-placeholder-count="14">
+                <div style="display: flex; align-items: center; height: 19px; font-family: var(--mono); font-size: 12.5px; padding-right: 10px;" style-hover="background: var(--hover);">
+                  <span style="width: 38px; flex: none; text-align: right; padding-right: 10px; color: var(--dim); font-size: 11px; user-select: none;">{{ ln.n }}</span>
+                  <sc-for list="{{ ln.indents }}" as="g" hint-placeholder-count="1">
+                    <span style="display: inline-block; width: 14px; flex: none; border-left: 1px solid var(--line-2); height: 19px;"></span>
+                  </sc-for>
+                  <sc-if value="{{ ln.hasCaret }}">
+                    <span onClick="{{ ln.onToggle }}" style="width: 12px; flex: none; color: var(--dim); cursor: pointer; font-size: 9px;">{{ ln.caret }}</span>
+                  </sc-if>
+                  <sc-if value="{{ ln.noCaret }}">
+                    <span style="width: 12px; flex: none;"></span>
+                  </sc-if>
+                  <sc-if value="{{ ln.hasKey }}">
+                    <span style="color: var(--accent);">{{ ln.key }}</span>
+                  </sc-if>
+                  <sc-if value="{{ ln.hasKey }}">
+                    <span style="color: var(--dim);">: </span>
+                  </sc-if>
+                  <sc-if value="{{ ln.isStr }}"><span style="color: var(--green);">{{ ln.val }}</span></sc-if>
+                  <sc-if value="{{ ln.isNum }}"><span style="color: var(--amber);">{{ ln.val }}</span></sc-if>
+                  <sc-if value="{{ ln.isLit }}"><span style="color: var(--muted);">{{ ln.val }}</span></sc-if>
+                  <sc-if value="{{ ln.isPunct }}"><span style="color: var(--muted);">{{ ln.val }}</span></sc-if>
+                  <span style="flex: 1;"></span>
+                  <sc-if value="{{ ln.hasKey }}">
+                    <span onClick="{{ ln.onPin }}" style="color: var(--dim); font-size: 10px; cursor: pointer; opacity: 0.55;" style-hover="opacity: 1; color: var(--accent);">⚲ pin</span>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showProps }}">
+            <div style="flex: 1; overflow: auto; min-height: 0; padding: 4px 0;">
+              <sc-for list="{{ propSections }}" as="sec" hint-placeholder-count="2">
+                <div style="padding: 8px 12px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim);">{{ sec.label }}</div>
+                <sc-for list="{{ sec.rows }}" as="p" hint-placeholder-count="5">
+                  <div style="display: grid; grid-template-columns: 260px 1fr; height: 24px; align-items: center; padding: 0 12px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--line-2);" style-hover="background: var(--hover);">
+                    <div style="color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ p.k }}</div>
+                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ p.v }}</div>
+                  </div>
+                </sc-for>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showRaw }}">
+            <div style="flex: 1; overflow: auto; min-height: 0; padding: 10px 12px;">
+              <div style="font-family: var(--mono); font-size: 12.5px; color: var(--muted); line-height: 1.55; word-break: break-all; white-space: pre-wrap;">{{ rawText }}</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- publisher panel -->
+      <sc-if value="{{ pubOpen }}">
+        <div onMouseDown="{{ onDragPub }}" style="height: 4px; flex: none; cursor: row-resize; background: var(--line-2); border-top: 1px solid var(--line);" style-hover="background: var(--accent-tint);"></div>
+        <div style="flex: none; height: {{ pubH }}; display: grid; grid-template-columns: 60% 40%; background: var(--surf); min-height: 0;">
+          <!-- tree editor -->
+          <div style="display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line);">
+            <div style="height: 30px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-bottom: 1px solid var(--line-2);">
+              <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--dim);">Payload builder</div>
+              <div style="flex: 1;"></div>
+              <button onClick="{{ onRegenerate }}" style="height: 22px; padding: 0 8px; font-size: 11px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer;" style-hover="background: var(--hover);">Regenerate</button>
+            </div>
+            <div style="height: 22px; flex: none; display: grid; grid-template-columns: 1fr 92px 150px 210px 78px; align-items: center; background: var(--surf2); border-bottom: 1px solid var(--line); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim);">
+              <div style="padding: 0 8px;">Key</div>
+              <div style="padding: 0 8px;">Type</div>
+              <div style="padding: 0 8px;">Value</div>
+              <div style="padding: 0 8px;">Generator</div>
+              <div></div>
+            </div>
+            <div style="flex: 1; overflow: auto; min-height: 0;">
+              <sc-for list="{{ pubRows }}" as="pr" hint-placeholder-count="14">
+                <div onMouseEnter="{{ pr.onEnter }}" onMouseLeave="{{ pr.onLeave }}" style="display: grid; grid-template-columns: 1fr 92px 150px 210px 78px; height: 26px; align-items: center; border-bottom: 1px solid var(--line-2); background: {{ pr.bg }};">
+                  <div style="display: flex; align-items: center; height: 26px; overflow: hidden;">
+                    <sc-for list="{{ pr.indents }}" as="gi" hint-placeholder-count="1">
+                      <span style="display: inline-block; width: 16px; flex: none; height: 26px; border-left: 1px solid var(--line-2);"></span>
+                    </sc-for>
+                    <input value="{{ pr.key }}" onChange="{{ pr.onKey }}" style="flex: 1; min-width: 0; height: 20px; border: 1px solid transparent; background: transparent; color: var(--text); font-family: var(--mono); font-size: 12.5px; padding: 0 4px; border-radius: 3px;" style-hover="border-color: var(--line);">
+                  </div>
+                  <div style="padding: 0 6px;">
+                    <div style="height: 20px; display: flex; align-items: center; justify-content: space-between; padding: 0 5px; border-radius: 3px; font-family: var(--mono); font-size: 11.5px; background: {{ pr.typeBg }}; color: {{ pr.typeFg }}; border: 1px solid {{ pr.typeEdge }}; cursor: pointer;">
+                      <span>{{ pr.type }}</span><span style="font-size: 8px; opacity: 0.6;">▾</span>
+                    </div>
+                  </div>
+                  <div style="padding: 0 4px;">
+                    <input value="{{ pr.value }}" onChange="{{ pr.onValue }}" disabled="{{ pr.locked }}" style="width: 100%; height: 20px; border: 1px solid transparent; background: transparent; color: {{ pr.valueFg }}; font-family: var(--mono); font-size: 12px; padding: 0 4px; border-radius: 3px;" style-hover="border-color: var(--line);">
+                  </div>
+                  <div style="padding: 0 4px; overflow: hidden;">
+                    <div style="height: 20px; display: flex; align-items: center; gap: 4px; padding: 0 4px; border: 1px solid var(--line-2); border-radius: 3px; background: var(--surf2); overflow: hidden;">
+                      <sc-for list="{{ pr.tokens }}" as="tk" hint-placeholder-count="1">
+                        <span style="display: inline-flex; align-items: center; height: 15px; padding: 0 6px; border-radius: 8px; background: var(--accent-tint); color: var(--accent); font-family: var(--mono); font-size: 10.5px; white-space: nowrap;">{{ tk.t }}</span>
+                      </sc-for>
+                      <sc-if value="{{ pr.noTokens }}">
+                        <span style="color: var(--dim); font-size: 11px; font-family: var(--mono);">—</span>
+                      </sc-if>
+                    </div>
+                  </div>
+                  <div style="display: flex; align-items: center; justify-content: flex-end; gap: 3px; padding-right: 7px;">
+                    <sc-if value="{{ pr.hovered }}">
+                      <span onClick="{{ pr.onAddSibling }}" title="Add sibling" style="width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 12px;" style-hover="background: var(--hover); color: var(--text);">+</span>
+                    </sc-if>
+                    <sc-if value="{{ pr.hovered }}">
+                      <span onClick="{{ pr.onAddChild }}" title="Add child" style="width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 11px;" style-hover="background: var(--hover); color: var(--text);">↳</span>
+                    </sc-if>
+                    <sc-if value="{{ pr.hovered }}">
+                      <span onClick="{{ pr.onDup }}" title="Duplicate" style="width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 10px;" style-hover="background: var(--hover); color: var(--text);">⧉</span>
+                    </sc-if>
+                    <sc-if value="{{ pr.hovered }}">
+                      <span onClick="{{ pr.onDelete }}" title="Delete" style="width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--red); cursor: pointer; font-size: 12px;" style-hover="background: var(--red-tint);">×</span>
+                    </sc-if>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <!-- preview -->
+          <div style="display: flex; flex-direction: column; min-height: 0;">
+            <div style="height: 30px; flex: none; display: flex; align-items: stretch; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line-2);">
+              <sc-for list="{{ pubTabs }}" as="pt" hint-placeholder-count="2">
+                <div onClick="{{ pt.onPick }}" style="display: flex; align-items: center; padding: 0 10px; font-size: 12px; cursor: pointer; color: {{ pt.fg }}; border-bottom: 2px solid {{ pt.edge }};" style-hover="color: var(--text);">{{ pt.label }}</div>
+              </sc-for>
+            </div>
+            <sc-if value="{{ showPayloadPreview }}">
+              <div style="flex: 1; overflow: auto; min-height: 0; padding: 6px 0;">
+                <sc-for list="{{ previewLines }}" as="pl" hint-placeholder-count="12">
+                  <div style="display: flex; align-items: center; height: 19px; font-family: var(--mono); font-size: 12px; border-left: 2px solid {{ pl.edge }}; background: {{ pl.bg }};">
+                    <span style="width: 30px; flex: none; text-align: right; padding-right: 8px; color: var(--dim); font-size: 10.5px;">{{ pl.n }}</span>
+                    <sc-for list="{{ pl.indents }}" as="pg2" hint-placeholder-count="1">
+                      <span style="display: inline-block; width: 13px; flex: none;"></span>
+                    </sc-for>
+                    <sc-if value="{{ pl.hasKey }}"><span style="color: var(--accent);">{{ pl.key }}</span></sc-if>
+                    <sc-if value="{{ pl.hasKey }}"><span style="color: var(--dim);">: </span></sc-if>
+                    <sc-if value="{{ pl.isStr }}"><span style="color: var(--green);">{{ pl.val }}</span></sc-if>
+                    <sc-if value="{{ pl.isNum }}"><span style="color: var(--amber);">{{ pl.val }}</span></sc-if>
+                    <sc-if value="{{ pl.isLit }}"><span style="color: var(--muted);">{{ pl.val }}</span></sc-if>
+                    <sc-if value="{{ pl.isPunct }}"><span style="color: var(--muted);">{{ pl.val }}</span></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ showEnvelope }}">
+              <div style="flex: 1; overflow: auto; min-height: 0;">
+                <sc-for list="{{ envelope }}" as="ev" hint-placeholder-count="6">
+                  <div style="display: grid; grid-template-columns: 150px 1fr; height: 25px; align-items: center; padding: 0 10px; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--line-2);" style-hover="background: var(--hover);">
+                    <div style="color: var(--muted);">{{ ev.k }}</div>
+                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ ev.v }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <div style="height: 40px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-top: 1px solid var(--line);">
+              <button onClick="{{ onPublish }}" style="height: 28px; padding: 0 13px; font-size: 12.5px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer; display: flex; align-items: center; gap: 7px;" style-hover="background: var(--accent-tint);">
+                <span>Publish</span><span style="font-family: var(--mono); font-size: 10.5px; opacity: 0.65;">⌘⏎</span>
+              </button>
+              <div style="display: flex; align-items: center; height: 28px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden;">
+                <div onClick="{{ onBurst }}" style="padding: 0 9px; height: 28px; display: flex; align-items: center; font-size: 12px; cursor: pointer; color: var(--text);" style-hover="background: var(--hover);">Burst ×</div>
+                <input value="{{ burst }}" onChange="{{ onBurstChange }}" style="width: 46px; height: 26px; border: 0; border-left: 1px solid var(--line); background: var(--surf2); color: var(--text); font-family: var(--mono); font-size: 12px; text-align: center; outline: none;">
+                <div style="display: flex; flex-direction: column; border-left: 1px solid var(--line);">
+                  <span onClick="{{ onBurstUp }}" style="width: 17px; height: 14px; display: flex; align-items: center; justify-content: center; font-size: 7px; color: var(--muted); cursor: pointer;" style-hover="background: var(--hover);">▲</span>
+                  <span onClick="{{ onBurstDown }}" style="width: 17px; height: 13px; display: flex; align-items: center; justify-content: center; font-size: 7px; color: var(--muted); cursor: pointer; border-top: 1px solid var(--line);" style-hover="background: var(--hover);">▼</span>
+                </div>
+              </div>
+              <div style="flex: 1;"></div>
+              <div style="font-family: var(--mono); font-size: 11.5px; color: {{ validFg }}; text-align: right; line-height: 1.35;">{{ validText }}</div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- status bar -->
+      <div style="height: 28px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 11px; background: var(--surf); border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--muted);">
+        <span>{{ statTotal }}</span>
+        <span style="color: var(--line);">·</span>
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="color: {{ capFg }};">{{ statDisk }}</span>
+          <div style="width: 92px; height: 5px; border-radius: 3px; background: var(--line-2); overflow: hidden;">
+            <div style="height: 5px; width: {{ capPct }}; background: {{ capFg }};"></div>
+          </div>
+        </div>
+        <span style="color: var(--line);">·</span>
+        <span>{{ statRetention }}</span>
+        <span style="color: var(--line);">·</span>
+        <span>{{ statLag }}</span>
+        <span style="flex: 1;"></span>
+        <span onClick="{{ onToggleDev }}" style="cursor: pointer; color: var(--dim);" style-hover="color: var(--text);">states ▴</span>
+        <span style="color: var(--line);">·</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ connDot }};"></span>
+          <span style="color: {{ connFg }};">{{ connText }}</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── DEEP SEARCH OVERLAY ─────────── -->
+  <sc-if value="{{ deepOpen }}">
+    <div style="position: absolute; left: 10px; top: 168px; width: 720px; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 18px 40px rgba(0,0,0,0.45); overflow: hidden; animation: es-fade 120ms ease-out;">
+      <div style="height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 11px; border-bottom: 1px solid var(--line-2);">
+        <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--dim);">Deep search</span>
+        <span style="font-family: var(--mono); font-size: 12px; color: var(--text);">{{ deepQuery }}</span>
+        <span style="flex: 1;"></span>
+        <button onClick="{{ onCancelDeep }}" style="height: 23px; padding: 0 9px; font-size: 11.5px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer;" style-hover="background: var(--hover);">Cancel</button>
+      </div>
+      <div style="padding: 10px 11px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="height: 4px; border-radius: 3px; background: var(--line-2); overflow: hidden;">
+          <div style="height: 4px; width: {{ deepPct }}; background: var(--accent);"></div>
+        </div>
+        <div style="font-family: var(--mono); font-size: 11.5px; color: var(--muted);">{{ deepStatus }}</div>
+      </div>
+      <div style="max-height: 232px; overflow: auto; border-top: 1px solid var(--line-2);">
+        <sc-for list="{{ deepResults }}" as="dr" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: 104px 190px 1fr 74px; height: 25px; align-items: center; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--line-2); animation: es-fade 120ms ease-out;" style-hover="background: var(--hover);">
+            <div style="padding: 0 9px; color: var(--muted);">{{ dr.time }}</div>
+            <div style="padding: 0 9px; overflow: hidden; text-overflow: ellipsis;">{{ dr.subject }}</div>
+            <div style="padding: 0 9px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ dr.preview }}</div>
+            <div style="padding: 0 9px; text-align: right; color: var(--muted);">{{ dr.size }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── CONNECTION DIALOG ─────────── -->
+  <sc-if value="{{ dialogOpen }}">
+    <div style="position: absolute; inset: 0; background: rgba(10,11,18,0.58); display: flex; align-items: center; justify-content: center;">
+      <div style="width: 640px; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; animation: es-fade 130ms ease-out;">
+        <div style="height: 42px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line-2);">
+          <div style="font-size: 14px; font-weight: 500;">{{ dialogTitle }}</div>
+          <div style="flex: 1;"></div>
+          <span onClick="{{ onCloseDialog }}" style="width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 14px;" style-hover="background: var(--hover); color: var(--text);">×</span>
+        </div>
+        <div style="display: flex; gap: 2px; padding: 8px 14px 0;">
+          <sc-for list="{{ dialogBrokers }}" as="db" hint-placeholder-count="3">
+            <div onClick="{{ db.onPick }}" style="height: 26px; display: flex; align-items: center; padding: 0 11px; font-size: 12px; cursor: pointer; border-radius: 5px 5px 0 0; color: {{ db.fg }}; background: {{ db.bg }}; border-bottom: 2px solid {{ db.edge }};" style-hover="color: var(--text);">{{ db.label }}</div>
+          </sc-for>
+        </div>
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow: auto;">
+          <sc-for list="{{ dialogFields }}" as="df" hint-placeholder-count="6">
+            <div style="display: grid; grid-template-columns: 178px 1fr; gap: 12px; align-items: center;">
+              <label style="font-size: 12px; color: var(--muted);">{{ df.label }}</label>
+              <sc-if value="{{ df.isSelect }}">
+                <div style="height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px; font-family: var(--mono); font-size: 12px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="border-color: var(--accent-dim);">
+                  <span>{{ df.value }}</span><span style="color: var(--dim); font-size: 9px;">▾</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ df.isText }}">
+                <input value="{{ df.value }}" onChange="{{ df.onChange }}" placeholder="{{ df.ph }}" style="height: 30px; padding: 0 9px; font-family: var(--mono); font-size: 12px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); outline: none;" style-hover="border-color: var(--accent-dim);">
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ dialogIsSqs }}">
+            <div style="padding: 9px 11px; background: var(--red-tint); border: 1px solid var(--red); border-radius: 6px; font-size: 12px; line-height: 1.5;">SQS has no peek. Every read makes messages invisible to other consumers for the visibility timeout — this connection will always open in Consume mode.</div>
+          </sc-if>
+        </div>
+        <div style="height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-top: 1px solid var(--line-2); background: var(--surf);">
+          <button onClick="{{ onTest }}" style="height: 30px; padding: 0 12px; font-size: 12px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="background: var(--hover);">Test connection</button>
+          <sc-if value="{{ testBusy }}">
+            <span style="width: 12px; height: 12px; border: 1.5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: es-spin 0.7s linear infinite;"></span>
+          </sc-if>
+          <sc-if value="{{ testOk }}">
+            <span style="font-family: var(--mono); font-size: 11.5px; color: var(--green);">✓ {{ testOkText }}</span>
+          </sc-if>
+          <sc-if value="{{ testFail }}">
+            <span style="font-family: var(--mono); font-size: 11.5px; color: var(--red);">✕ timed out after 5000ms</span>
+          </sc-if>
+          <div style="flex: 1;"></div>
+          <button onClick="{{ onCloseDialog }}" style="height: 30px; padding: 0 12px; font-size: 12px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="background: var(--hover);">Cancel</button>
+          <button onClick="{{ onSaveDialog }}" style="height: 30px; padding: 0 14px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">Save &amp; connect</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── SETTINGS ─────────── -->
+  <sc-if value="{{ settingsOpen }}">
+    <div style="position: absolute; inset: 0; background: rgba(10,11,18,0.58); display: flex; align-items: flex-start; justify-content: center; padding-top: 46px; overflow: auto;">
+      <div style="width: 720px; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); animation: es-fade 130ms ease-out;">
+        <div style="height: 42px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line-2);">
+          <div style="font-size: 14px; font-weight: 500;">Storage and retention</div>
+          <div style="flex: 1;"></div>
+          <span onClick="{{ onCloseSettings }}" style="width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: var(--muted); cursor: pointer; font-size: 14px;" style-hover="background: var(--hover); color: var(--text);">×</span>
+        </div>
+        <div style="padding: 16px; display: flex; flex-direction: column; gap: 20px;">
+          <div style="display: flex; flex-direction: column; gap: 9px;">
+            <div style="display: flex; align-items: baseline; gap: 9px;">
+              <div style="font-size: 12.5px;">Storage cap</div>
+              <div style="flex: 1;"></div>
+              <input value="{{ capMb }}" onChange="{{ onCapChange }}" style="width: 78px; height: 27px; padding: 0 8px; font-family: var(--mono); font-size: 12px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); text-align: right; outline: none;">
+              <div style="font-family: var(--mono); font-size: 12px; color: var(--dim);">MB</div>
+            </div>
+            <input type="range" min="500" max="2000" step="50" value="{{ capMb }}" onChange="{{ onCapChange }}" style="width: 100%; accent-color: var(--accent);">
+            <div style="display: flex; height: 12px; border-radius: 3px; overflow: hidden; border: 1px solid var(--line-2);">
+              <div style="width: {{ allocPayloads }}; background: var(--accent-dim);"></div>
+              <div style="width: {{ allocMeta }}; background: var(--accent); opacity: 0.55;"></div>
+              <div style="width: {{ allocIndex }}; background: var(--muted); opacity: 0.5;"></div>
+              <div style="flex: 1; background: var(--line-2);"></div>
+            </div>
+            <div style="display: flex; gap: 16px; font-family: var(--mono); font-size: 11px; color: var(--muted);">
+              <sc-for list="{{ allocLegend }}" as="al" hint-placeholder-count="3">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="width: 8px; height: 8px; border-radius: 2px; background: {{ al.color }};"></span>
+                  <span>{{ al.label }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="height: 1px; background: linear-gradient(to right, var(--line), transparent);"></div>
+
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="font-size: 12.5px; width: 180px;">Retention</div>
+            <input value="{{ retention }}" onChange="{{ onRetentionChange }}" style="width: 70px; height: 27px; padding: 0 8px; font-family: var(--mono); font-size: 12px; background: var(--surf2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); text-align: right; outline: none;">
+            <div style="font-family: var(--mono); font-size: 12px; color: var(--dim);">days</div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 9px;">
+            <div style="font-size: 12.5px;">Indexed body prefix</div>
+            <div style="display: flex; height: 30px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; width: max-content; background: var(--surf2);">
+              <sc-for list="{{ prefixOpts }}" as="po" hint-placeholder-count="4">
+                <div onClick="{{ po.onPick }}" style="display: flex; align-items: center; padding: 0 14px; font-family: var(--mono); font-size: 12px; cursor: pointer; border-left: 1px solid var(--line-2); color: {{ po.fg }}; background: {{ po.bg }}; box-shadow: {{ po.ring }};">{{ po.label }}</div>
+              </sc-for>
+            </div>
+            <div style="font-size: 12px; color: var(--muted);">{{ prefixEstimate }}</div>
+          </div>
+
+          <div style="height: 1px; background: linear-gradient(to right, var(--line), transparent);"></div>
+
+          <div style="display: flex; flex-direction: column; gap: 7px;">
+            <div style="font-size: 12.5px;">Per-connection overrides</div>
+            <div style="border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden;">
+              <div style="display: grid; grid-template-columns: 1fr 120px 90px; height: 24px; align-items: center; background: var(--surf); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim);">
+                <div style="padding: 0 10px;">Connection</div>
+                <div style="padding: 0 10px;">Prefix</div>
+                <div style="padding: 0 10px;">Retention</div>
+              </div>
+              <sc-for list="{{ overrides }}" as="ov" hint-placeholder-count="3">
+                <div style="display: grid; grid-template-columns: 1fr 120px 90px; height: 26px; align-items: center; font-family: var(--mono); font-size: 12px; border-top: 1px solid var(--line-2);" style-hover="background: var(--hover);">
+                  <div style="padding: 0 10px;">{{ ov.name }}</div>
+                  <div style="padding: 0 10px; color: var(--muted);">{{ ov.prefix }}</div>
+                  <div style="padding: 0 10px; color: var(--muted);">{{ ov.retention }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 7px;">
+            <div style="font-size: 12.5px;">Session files</div>
+            <div style="display: flex; flex-direction: column;">
+              <sc-for list="{{ sessionFiles }}" as="sf" hint-placeholder-count="5">
+                <div style="display: grid; grid-template-columns: 1fr 90px 70px; height: 26px; align-items: center; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--line-2);" style-hover="background: var(--hover);">
+                  <div>{{ sf.name }}</div>
+                  <div style="text-align: right; color: var(--muted);">{{ sf.size }}</div>
+                  <div style="display: flex; justify-content: flex-end;">
+                    <span onClick="{{ sf.onDelete }}" style="padding: 0 7px; height: 19px; display: flex; align-items: center; border-radius: 3px; color: var(--red); cursor: pointer; font-size: 11px;" style-hover="background: var(--red-tint);">delete</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <div style="height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-top: 1px solid var(--line-2); background: var(--surf);">
+          <div style="font-family: var(--mono); font-size: 11.5px; color: var(--muted);">{{ statDisk }} in use</div>
+          <div style="flex: 1;"></div>
+          <button onClick="{{ onCloseSettings }}" style="height: 30px; padding: 0 14px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">Done</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── LARGE PAYLOAD CONFIRMATION ─────────── -->
+  <sc-if value="{{ confirmOpen }}">
+    <div style="position: absolute; inset: 0; background: rgba(10,11,18,0.58); display: flex; align-items: center; justify-content: center;">
+      <div style="width: 420px; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); padding: 16px; display: flex; flex-direction: column; gap: 11px; animation: es-fade 130ms ease-out;">
+        <div style="font-size: 14px; font-weight: 500;">Load {{ confirmSize }} payload?</div>
+        <div style="font-size: 12.5px; color: var(--muted); line-height: 1.55;">Rendering this message will block the UI for roughly {{ confirmDelay }} and hold it in memory until you select another row.</div>
+        <div style="display: flex; align-items: center; gap: 8px; padding-top: 3px;">
+          <label style="display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); cursor: pointer;">
+            <input type="checkbox" style="accent-color: var(--accent);">
+            <span>Don't ask again this session</span>
+          </label>
+          <div style="flex: 1;"></div>
+          <button onClick="{{ onCancelConfirm }}" style="height: 29px; padding: 0 12px; font-size: 12px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 5px; cursor: pointer;" style-hover="background: var(--hover);">Cancel</button>
+          <button onClick="{{ onConfirmLoad }}" style="height: 29px; padding: 0 13px; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; cursor: pointer;" style-hover="background: var(--accent-tint);">Load payload</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── TOAST ─────────── -->
+  <sc-if value="{{ toastOn }}">
+    <div style="position: absolute; right: 16px; bottom: 42px; padding: 9px 13px; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 12px 28px rgba(0,0,0,0.4); font-size: 12.5px; display: flex; align-items: center; gap: 9px; animation: es-fade 120ms ease-out;">
+      <span style="color: var(--green); font-size: 12px;">✓</span>
+      <span>{{ toastText }}</span>
+    </div>
+  </sc-if>
+
+  <!-- ─────────── DEV STATE PANEL ─────────── -->
+  <sc-if value="{{ devOpen }}">
+    <div style="position: absolute; left: {{ devLeft }}; right: {{ devRight }}; bottom: 36px; width: 262px; background: var(--raise); border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 14px 34px rgba(0,0,0,0.45); overflow: hidden;">
+      <div style="height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--line-2);">
+        <span style="font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--dim);">Mockup states</span>
+        <span style="flex: 1;"></span>
+        <span onClick="{{ onToggleDev }}" style="cursor: pointer; color: var(--muted); font-size: 13px;">×</span>
+      </div>
+      <div style="padding: 6px; display: flex; flex-direction: column; gap: 2px; max-height: 420px; overflow: auto;">
+        <sc-for list="{{ devStates }}" as="ds" hint-placeholder-count="10">
+          <div onClick="{{ ds.onPick }}" style="height: 24px; min-height: 24px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; background: {{ ds.bg }}; color: {{ ds.fg }};" style-hover="background: var(--hover);">
+            <span style="font-family: var(--mono); font-size: 10px; color: var(--dim); width: 14px; flex: none;">{{ ds.n }}</span>
+            <span>{{ ds.label }}</span>
+          </div>
+        </sc-for>
+        <div style="height: 1px; background: var(--line-2); margin: 5px 0;"></div>
+        <sc-for list="{{ devBrokers }}" as="dbk" hint-placeholder-count="3">
+          <div onClick="{{ dbk.onPick }}" style="height: 24px; min-height: 24px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; background: {{ dbk.bg }}; color: {{ dbk.fg }};" style-hover="background: var(--hover);">
+            <span style="font-family: var(--mono); font-size: 10px; color: var(--dim); width: 14px; flex: none;">{{ dbk.glyph }}</span>
+            <span>{{ dbk.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:1000},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Mockup&quot;},&quot;showDev&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Mockup&quot;}}">
+const SUBJECTS = [
+  ["orders.created", '{"orderId":"OR-88421","customer":"acme-corp","total":128.40,"currency":"EUR","lines":3'],
+  ["orders.cancelled", '{"orderId":"OR-88317","reason":"customer_request","refund":true,"total":64.00'],
+  ["payments.authorized", '{"paymentId":"PAY-5518902","orderId":"OR-88421","amount":128.40,"psp":"adyen"'],
+  ["payments.settled", '{"paymentId":"PAY-5518871","settledAt":"2026-08-28T14:31:02Z","fee":2.14'],
+  ["ledger.entry.posted", '{"entryId":"LE-9911204","account":"4010-revenue","debit":0,"credit":128.40'],
+  ["telemetry.device.reading", '{"deviceId":"dev-ff-2291","temp":21.4,"humidity":47.2,"battery":0.82'],
+  ["telemetry.device.offline", '{"deviceId":"dev-ff-1180","lastSeen":"2026-08-28T14:12:44Z","rssi":-91'],
+  ["inventory.reserved", '{"sku":"SKU-40192","qty":2,"warehouse":"NL-AMS-1","orderId":"OR-88421"'],
+  ["shipment.dispatched", '{"shipmentId":"SH-77104","carrier":"dhl","tracking":"JJD0002340991","eta":"2026-08-30"'],
+  ["refund.requested", '{"refundId":"RF-2201","orderId":"OR-88317","amount":64.00,"approvedBy":"ops.maria"'],
+];
+const HEX = "0123456789abcdef";
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.seed = 20260828;
+    this.clock = 14 * 3600 + 32 * 60 + 7.418;
+    this.state = {
+      theme: null, screen: "launcher", devState: "cold",
+      broker: "kafka", activeTab: 0, picked: 0,
+      mode: "peek", run: "idle", banner: true, bannerDismissed: false,
+      query: "", scope: "Live", searchRunning: false, searchPct: 0,
+      rows: [], msgTotal: 431882, rate: 847, bytes: 1.2, dropped: 4102,
+      sel: 4, detailOpen: true, detailTab: "body", detailH: 320,
+      pubOpen: false, pubH: 380, pubTab: "payload", pubHover: -1, burst: 100,
+      pinned: false, collapsed: {}, loadedPayloads: {},
+      deepOpen: false, deepPct: 0, deepScanned: 0, deepMatches: 0, deepElapsed: 0, deepResults: [],
+      dialog: null, dialogBroker: "kafka", test: "idle",
+      settingsOpen: false, capMb: 2000, retention: 20, prefix: "2 KB",
+      confirm: null, toast: null, devOpen: true,
+      diskUsed: 1.84, lag: 340,
+      pubRows: this.initPubRows(),
+    };
+    this.state.rows = this.makeRows(34);
+  }
+
+  rnd() { this.seed = (this.seed * 1103515245 + 12345) % 2147483648; return this.seed / 2147483648; }
+
+  guid() {
+    let s = "";
+    for (let i = 0; i < 32; i++) s += HEX[Math.floor(this.rnd() * 16)];
+    return s.slice(0, 8) + "-" + s.slice(8, 12) + "-" + s.slice(12, 16) + "-" + s.slice(16, 20) + "-" + s.slice(20);
+  }
+
+  makeRows(n, forward) {
+    const out = [];
+    if (forward) {
+      // newest rows: advance the running clock, then emit newest-first
+      const stamps = [];
+      for (let i = 0; i < n; i++) { this.clock += 0.05 + this.rnd() * 0.5; stamps.push(this.clock); }
+      stamps.reverse();
+      return stamps.map((ts, i) => this.makeRow(ts, i + 12));
+    }
+    let t = this.clock;
+    for (let i = 0; i < n; i++) {
+      out.push(this.makeRow(t, i));
+      t -= 0.02 + this.rnd() * 0.6;
+    }
+    return out;
+  }
+
+  makeRow(t, i) {
+    const [subject, body] = SUBJECTS[Math.floor(this.rnd() * SUBJECTS.length)];
+    const kb = 0.4 + this.rnd() * 12;
+    const roll = this.rnd();
+    const flag = i > 3 && roll > 0.92 ? "large" : i > 6 && roll > 0.86 ? "evicted" : i > 8 && roll > 0.8 ? "dl" : "";
+    return {
+      id: "m" + i + "-" + Math.floor(this.rnd() * 1e6),
+      t, subject, body,
+      corrFull: this.guid(),
+      kb: flag === "large" ? 64 + this.rnd() * 4300 : kb,
+      part: Math.floor(this.rnd() * 6),
+      flag,
+    };
+  }
+
+  initPubRows() {
+    const r = (depth, key, type, value, tokens) => ({ depth, key, type, value, tokens: tokens || [] });
+    return [
+      r(0, "{", "object", "", []),
+      r(1, "eventId", "guid", "", ["{{guid}}"]),
+      r(1, "eventType", "enum", "", ["{{pick:created|updated|cancelled}}"]),
+      r(1, "occurredAt", "datetime", "", ["{{now:iso}}"]),
+      r(1, "order", "object", "", []),
+      r(2, "orderId", "string", "OR-88421", []),
+      r(2, "total", "number", "128.40", []),
+      r(2, "currency", "string", "EUR", []),
+      r(2, "lines", "array", "", []),
+      r(3, "sku", "string", "SKU-40192", []),
+      r(3, "qty", "number", "", ["{{int:1..100}}"]),
+      r(3, "unitPrice", "number", "42.80", []),
+      r(2, "expedited", "boolean", "false", []),
+      r(1, "correlationId", "string", "", ["{{ref:$.orderId}}"]),
+      r(1, "tenant", "string", "acme-corp", []),
+      r(1, "retryOf", "null", "null", []),
+    ];
+  }
+
+  componentDidMount() {
+    this.timer = setInterval(() => this.tick(), 800);
+    this.key = (e) => {
+      const k = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && k === "f") { e.preventDefault(); if (this.searchEl) this.searchEl.focus(); }
+      else if (e.ctrlKey && k === "2") { e.preventDefault(); this.setState(s => ({ pubOpen: !s.pubOpen })); }
+      else if (k === "escape") this.setState({ dialog: null, settingsOpen: false, confirm: null, deepOpen: false });
+    };
+    window.addEventListener("keydown", this.key);
+  }
+  componentWillUnmount() { clearInterval(this.timer); window.removeEventListener("keydown", this.key); }
+
+  tick() {
+    const s = this.state;
+    if (s.deepOpen && s.deepPct < 100) {
+      const pct = Math.min(100, s.deepPct + 7);
+      const res = s.deepResults.slice();
+      const src = this.state.rows;
+      if (res.length < 9) res.push(src[(res.length * 3 + 2) % src.length]);
+      this.setState({ deepPct: pct, deepScanned: Math.round(1884 * pct / 100), deepMatches: 40 + res.length * 6, deepElapsed: (s.deepElapsed + 0.8), deepResults: res });
+    }
+    if (s.run !== "streaming") return;
+    const rows = s.rows.slice();
+    const add = this.makeRows(2, true);
+    rows.unshift(...add);
+    if (rows.length > 46) rows.length = 46;
+    this.setState({
+      rows,
+      msgTotal: s.msgTotal + 2 + Math.floor(this.rnd() * 6),
+      rate: 700 + Math.floor(this.rnd() * 400),
+      dropped: s.devState === "saturated" ? s.dropped + Math.floor(this.rnd() * 90) : s.dropped,
+      lag: 260 + Math.floor(this.rnd() * 200),
+      sel: s.sel + 2,
+    });
+  }
+
+  fmtTime(t) {
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+    const p = (x, n) => String(Math.floor(x)).padStart(n, "0");
+    return p(h, 2) + ":" + p(m, 2) + ":" + p(sec, 2) + "." + String(Math.round((sec % 1) * 1000)).padStart(3, "0");
+  }
+  fmtSize(kb) { return kb >= 1024 ? (kb / 1024).toFixed(1) + " MB" : kb.toFixed(1) + " KB"; }
+  fmtNum(n) { return n.toLocaleString("en-US"); }
+  midEllipsis(s, n) { return s.length <= n ? s : s.slice(0, Math.ceil(n / 2) - 1) + "…" + s.slice(-Math.floor(n / 2)); }
+
+  segs(text, q) {
+    if (!q) return [{ t: text, plain: true }];
+    const out = []; const lower = text.toLowerCase(); const lq = q.toLowerCase();
+    let i = 0;
+    while (i < text.length) {
+      const at = lower.indexOf(lq, i);
+      if (at === -1) { out.push({ t: text.slice(i), plain: true }); break; }
+      if (at > i) out.push({ t: text.slice(i, at), plain: true });
+      out.push({ t: text.slice(at, at + q.length), hit: true });
+      i = at + q.length;
+    }
+    return out.length ? out : [{ t: text, plain: true }];
+  }
+
+  setDev(key) {
+    const p = {
+      cold: { screen: "launcher", picked: -1, run: "idle" },
+      connecting: { screen: "workspace", run: "connecting", broker: "kafka" },
+      streaming: { screen: "workspace", run: "streaming", broker: "kafka", mode: "peek" },
+      paused: { screen: "workspace", run: "paused" },
+      saturated: { screen: "workspace", run: "streaming", dropped: 4102 },
+      error: { screen: "workspace", run: "error" },
+      emptysearch: { screen: "workspace", run: "paused", query: "zzz-no-match", scope: "Live" },
+      deep: { screen: "workspace", run: "paused", query: "OR-88421", scope: "Deep", deepOpen: true, deepPct: 12, deepResults: [], deepElapsed: 0 },
+      nearcap: { screen: "workspace", run: "streaming", diskUsed: 1.92 },
+      mixed: { screen: "workspace", run: "paused", query: "" },
+      publisher: { screen: "workspace", pubOpen: true, detailOpen: false },
+      split: { screen: "workspace", pubOpen: true, detailOpen: true, detailH: 240, pubH: 300 },
+      sqs: { screen: "workspace", broker: "sqs", mode: "consume", bannerDismissed: false, run: "streaming" },
+    }[key] || {};
+    this.setState(Object.assign({ devState: key, query: "" }, p));
+  }
+
+  drag(e, field, min, max, invert) {
+    const startY = e.clientY, start = this.state[field];
+    const move = (ev) => {
+      const d = invert ? startY - ev.clientY : ev.clientY - startY;
+      this.setState({ [field]: Math.max(min, Math.min(max, start + d)) });
+    };
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  }
+
+  flash(text) {
+    this.setState({ toast: text });
+    clearTimeout(this.toastT);
+    this.toastT = setTimeout(() => this.setState({ toast: null }), 2000);
+  }
+
+  bodyLinesFor(row) {
+    const q = [];
+    const push = (depth, key, val, kind) => q.push({ depth, key, val, kind });
+    push(0, "", "{", "punct");
+    push(1, '"eventId"', '"' + row.corrFull + '"', "str");
+    push(1, '"type"', '"' + row.subject + '"', "str");
+    push(1, '"occurredAt"', '"2026-08-28T' + this.fmtTime(row.t).slice(0, 8) + 'Z"', "str");
+    push(1, '"payload"', "{", "punct");
+    push(2, '"orderId"', '"OR-88421"', "str");
+    push(2, '"customer"', "{", "punct");
+    push(3, '"id"', '"acme-corp"', "str");
+    push(3, '"tier"', '"enterprise"', "str");
+    push(2, "", "},", "punct");
+    push(2, '"total"', "128.40", "num");
+    push(2, '"currency"', '"EUR"', "str");
+    push(2, '"lines"', "[", "punct");
+    push(3, "", '{ "sku": "SKU-40192", "qty": 2 },', "punct");
+    push(3, "", '{ "sku": "SKU-99120", "qty": 1 }', "punct");
+    push(2, "", "],", "punct");
+    push(2, '"expedited"', "false", "lit");
+    push(1, "", "},", "punct");
+    push(1, '"traceparent"', '"00-' + row.corrFull.replace(/-/g, "").slice(0, 32) + '-01"', "str");
+    push(1, '"retryOf"', "null", "lit");
+    push(0, "", "}", "punct");
+    return q;
+  }
+
+  resolveToken(tok) {
+    if (tok.indexOf("{{guid}}") === 0) return '"3f9a1c02-7b41-4e18-9d2a-5c81f0aa2e77"';
+    if (tok.indexOf("{{now:iso}}") === 0) return '"2026-08-28T14:32:07.418Z"';
+    if (tok.indexOf("{{int:") === 0) return String(3 + Math.floor((this.state.regen || 0) % 7) + 4);
+    if (tok.indexOf("{{pick:") === 0) return '"created"';
+    if (tok.indexOf("{{ref:") === 0) return '"OR-88421"';
+    return '""';
+  }
+
+  renderVals() {
+    const s = this.state;
+    const theme = s.theme || this.props.theme || "dark";
+    const light = theme === "light";
+    const broker = s.broker;
+    const on = "inset 0 0 0 1px var(--accent)";
+    const redOn = "inset 0 0 0 1px var(--red)";
+    const V = {};
+
+    V.theme = theme;
+    V.themeLabel = light ? "Dark" : "Light";
+    V.onToggleTheme = () => this.setState({ theme: light ? "dark" : "light" });
+    V.showLauncher = s.screen === "launcher";
+    V.showWorkspace = s.screen === "workspace";
+    V.onToggleDev = () => this.setState({ devOpen: !s.devOpen });
+
+    /* ── launcher ── */
+    const conns = [
+      { g: "Kafka", name: "prod-eu-orders", endpoint: "pkc-4nym6.eu-west-1.aws.confluent.cloud:9092", used: "2m ago", dot: "var(--green)", kind: "kafka" },
+      { g: "Kafka", name: "staging-eu", endpoint: "pkc-921xt.eu-west-1.aws.confluent.cloud:9092", used: "yesterday", dot: "var(--dim)", kind: "kafka" },
+      { g: "Azure Service Bus", name: "payments-sb", endpoint: "payments-prod.servicebus.windows.net", used: "18m ago", dot: "var(--amber)", kind: "asb" },
+      { g: "AWS SQS", name: "ledger-dlq", endpoint: "https://sqs.eu-central-1.amazonaws.com/4419/ledger-dlq", used: "3d ago", dot: "var(--red)", kind: "sqs" },
+    ];
+    const cold = s.devState === "cold" || s.picked < 0;
+    V.coldStart = cold;
+    V.hasSaved = !cold;
+    V.savedCount = cold ? "0" : conns.length + " saved";
+    V.statusLauncher = cold ? "no connections · credentials stored locally" : conns.length + " connections · credentials stored locally";
+    const groups = [];
+    conns.forEach((c, i) => {
+      let g = groups.find(x => x.label === c.g);
+      if (!g) { g = { label: c.g, items: [] }; groups.push(g); }
+      g.items.push(Object.assign({}, c, { sel: i === s.picked, onPick: () => this.setState({ picked: i, test: "idle" }) }));
+    });
+    V.savedGroups = groups;
+    const picked = conns[Math.max(0, s.picked)] || conns[0];
+    V.pickedName = picked.name;
+    V.pickedKind = picked.endpoint;
+    V.pickedIsSqs = picked.kind === "sqs";
+    const fieldsFor = (kind) => kind === "kafka" ? [
+      { label: "Bootstrap servers", value: "pkc-4nym6.eu-west-1.aws.confluent.cloud:9092", isText: true },
+      { label: "Security protocol", value: "SASL_SSL", isSelect: true },
+      { label: "SASL mechanism", value: "PLAIN", isSelect: true },
+      { label: "Username", value: "ORDERSVC7XK2", isText: true },
+      { label: "Password", value: "••••••••••••••••", isText: true },
+      { label: "Consumer group prefix", value: "eventscope-", isText: true },
+      { label: "Topic", value: "orders.v2", isText: true },
+    ] : kind === "asb" ? [
+      { label: "Auth mode", value: "Connection string", isSelect: true },
+      { label: "Connection string", value: "Endpoint=sb://payments-prod…", isText: true },
+      { label: "Fully-qualified namespace", value: "payments-prod.servicebus.windows.net", isText: true },
+      { label: "Entity type", value: "Topic", isSelect: true },
+      { label: "Entity name", value: "payments.settled", isText: true },
+      { label: "Subscription", value: "eventscope-tap", isText: true },
+    ] : [
+      { label: "Region", value: "eu-central-1", isSelect: true },
+      { label: "Queue URL", value: "https://sqs.eu-central-1.amazonaws.com/4419/ledger-dlq", isText: true },
+      { label: "Credential source", value: "Shared profile (default)", isSelect: true },
+      { label: "Visibility timeout", value: "30s", isText: true },
+    ];
+    V.pickedFields = fieldsFor(picked.kind);
+    V.onOpenPicked = () => this.setState({ screen: "workspace", broker: picked.kind, run: "streaming", devState: "streaming", mode: picked.kind === "sqs" ? "consume" : "peek" });
+    V.onNewKafka = () => this.setState({ dialog: true, dialogBroker: "kafka", test: "idle", picked: 0 });
+    V.onNewAsb = () => this.setState({ dialog: true, dialogBroker: "asb", test: "idle", picked: 2 });
+    V.onNewSqs = () => this.setState({ dialog: true, dialogBroker: "sqs", test: "idle", picked: 3 });
+    V.onTest = () => {
+      this.setState({ test: "busy" });
+      clearTimeout(this.testT);
+      this.testT = setTimeout(() => this.setState({ test: s.dialogBroker === "sqs" || picked.kind === "sqs" ? "fail" : "ok" }), 1400);
+    };
+    V.testBusy = s.test === "busy"; V.testOk = s.test === "ok"; V.testFail = s.test === "fail";
+    V.testOkText = "connected · kafka 3.7.1 · 6 partitions";
+
+    /* ── tabs ── */
+    const tabDefs = [
+      { name: "prod-eu-orders", kind: "kafka" },
+      { name: "payments-sb", kind: "asb" },
+      { name: "ledger-dlq", kind: "sqs" },
+    ];
+    V.tabs = tabDefs.map((t, i) => {
+      const active = t.kind === broker;
+      const dot = !active ? "var(--dim)" : s.run === "error" ? "var(--red)" : s.run === "streaming" ? (s.devState === "saturated" ? "var(--amber)" : "var(--green)") : s.run === "connecting" ? "var(--amber)" : "var(--dim)";
+      return {
+        name: t.name, dot,
+        bg: active ? "var(--surf)" : "transparent",
+        fg: active ? "var(--text)" : "var(--muted)",
+        edge: active ? "var(--accent)" : "transparent",
+        onPick: () => this.setState({ broker: t.kind, mode: t.kind === "sqs" ? "consume" : "peek", bannerDismissed: false }),
+        onClose: (e) => { e.stopPropagation(); this.flash("Tab closed · " + t.name); },
+      };
+    });
+    V.onNewTab = () => this.setState({ screen: "launcher" });
+
+    /* ── toolbar ── */
+    V.brokerGlyph = broker === "kafka" ? "K" : broker === "asb" ? "A" : "S";
+    V.entityName = broker === "kafka" ? "orders.v2" : broker === "asb" ? "payments.settled" : "ledger-dlq";
+    V.showPartition = broker === "kafka";
+    V.showSubscription = broker === "asb";
+    V.partitionLabel = "all (6)";
+    V.subscriptionLabel = "eventscope-tap";
+    const sqs = broker === "sqs";
+    V.peekTooltip = sqs ? "SQS has no non-destructive read — every receive hides the message for the visibility timeout." : "Instant, non-destructive";
+    V.peekCursor = sqs ? "not-allowed" : "pointer";
+    V.peekOpacity = sqs ? "0.4" : "1";
+    const peekSel = s.mode === "peek" && !sqs;
+    V.peekFg = peekSel ? "var(--accent)" : "var(--muted)";
+    V.peekBg = peekSel ? "var(--accent-tint)" : "transparent";
+    V.peekRing = peekSel ? on : "none";
+    const consSel = s.mode === "consume" || sqs;
+    V.consumeFg = consSel ? "var(--red)" : "var(--muted)";
+    V.consumeBg = consSel ? "var(--red-tint)" : "transparent";
+    V.consumeRing = consSel ? redOn : "none";
+    V.onPeek = () => { if (!sqs) this.setState({ mode: "peek" }); };
+    V.onConsume = () => this.setState({ mode: "consume" });
+    const running = s.run === "streaming";
+    V.connecting = s.run === "connecting";
+    V.runLabel = s.run === "connecting" ? "Connecting…" : running ? "Stop" : "Start";
+    V.runKey = "⌘R";
+    V.runEdge = running ? "var(--red)" : s.run === "error" ? "var(--red)" : "var(--accent)";
+    V.onToggleRun = () => this.setState({ run: running ? "paused" : "streaming", devState: running ? "paused" : "streaming" });
+    V.onTogglePublisher = () => this.setState({ pubOpen: !s.pubOpen });
+    V.pubBg = s.pubOpen ? "var(--accent-tint)" : "transparent";
+    V.showBanner = sqs && s.mode === "consume" && !s.bannerDismissed && s.run !== "error";
+    V.bannerDot = sqs && s.bannerDismissed;
+    V.onDismissBanner = () => this.setState({ bannerDismissed: true });
+    V.showErrorBanner = s.run === "error";
+    V.onRetry = () => this.setState({ run: "connecting", devState: "connecting" });
+    V.throughput = this.fmtNum(s.msgTotal) + " msg  ·  " + (running ? this.fmtNum(s.rate) : "0") + "/s  ·  " + s.bytes.toFixed(1) + " GB";
+    V.saturated = s.devState === "saturated";
+    V.droppedText = this.fmtNum(s.dropped);
+
+    /* ── search ── */
+    V.query = s.query;
+    V.hasQuery = !!s.query;
+    V.searchRef = (el) => { this.searchEl = el; };
+    V.onQuery = (e) => this.setState({ query: e.target.value, searchRunning: s.scope !== "Live" });
+    V.onClearQuery = () => this.setState({ query: "" });
+    V.scopes = [
+      { label: "Live", hint: "instant · in-memory" },
+      { label: "Today", hint: "indexed" },
+      { label: "20 days", hint: "indexed" },
+      { label: "Deep", hint: "full scan" },
+    ].map(sc => {
+      const sel = s.scope === sc.label;
+      return {
+        label: sc.label, hint: sc.hint,
+        fg: sel ? "var(--accent)" : "var(--muted)",
+        bg: sel ? "var(--accent-tint)" : "transparent",
+        ring: sel ? on : "none",
+        onPick: () => this.setState(sc.label === "Deep"
+          ? { scope: "Deep", deepOpen: true, deepPct: 6, deepResults: [], deepElapsed: 0 }
+          : { scope: sc.label, searchRunning: sc.label !== "Live" && !!s.query }),
+      };
+    });
+    V.searchRunning = s.searchRunning;
+    V.searchPct = "62%";
+
+    /* ── grid ── */
+    const q = s.query.trim();
+    const filtered = q ? s.rows.filter(r => (r.subject + r.body + r.corrFull).toLowerCase().includes(q.toLowerCase())) : s.rows;
+    V.showPartCol = broker === "kafka";
+    V.pinnedOn = s.pinned;
+    const cols = [
+      { label: "Time", align: "flex-start" },
+      { label: "Subject", align: "flex-start" },
+      { label: "Correlation ID", align: "flex-start" },
+      { label: "Size", align: "flex-end" },
+    ];
+    if (broker === "kafka") cols.push({ label: "Part", align: "flex-end" });
+    if (s.pinned) cols.push({ label: "orderId", align: "flex-start", pinned: true, onUnpin: (e) => { e.stopPropagation(); this.setState({ pinned: false }); } });
+    cols.push({ label: "Preview", align: "flex-start" });
+    V.columns = cols;
+    V.gridCols = "100px 180px 260px 70px " + (broker === "kafka" ? "48px " : "") + (s.pinned ? "150px " : "") + "1fr";
+    V.gridSkeleton = s.run === "connecting";
+    V.gridEmpty = s.run !== "connecting" && q && filtered.length === 0;
+    V.gridRowsVisible = s.run !== "connecting" && !(q && filtered.length === 0);
+    V.skeletonRows = Array.from({ length: 16 }, (_, i) => ({ w1: (70 + (i % 4) * 12) + "px", w2: (110 + (i % 3) * 26) + "px" }));
+    V.rows = filtered.map((r, i) => {
+      const selected = i === (s.sel % Math.max(1, filtered.length));
+      const evicted = r.flag === "evicted";
+      const large = r.flag === "large";
+      const preview = evicted ? "payload evicted" : large ? "payload not previewed" : r.body;
+      return {
+        time: this.fmtTime(r.t),
+        subjSegs: this.segs(r.subject, q),
+        corr: this.midEllipsis(r.corrFull, 33),
+        size: this.fmtSize(r.kb),
+        sizeFg: large ? "var(--amber)" : "var(--text)",
+        part: broker === "kafka" ? String(r.part) : "",
+        pinnedVal: "OR-8" + (8000 + (r.part * 137) % 900),
+        prevSegs: (evicted || large) ? [{ t: preview, plain: true }] : this.segs(preview, q),
+        previewStyle: (evicted || large) ? "italic" : "normal",
+        bg: selected ? "var(--sel)" : (i % 2 ? "var(--line-2)" : "transparent"),
+        opacity: evicted ? "0.55" : "1",
+        edge: r.flag === "dl" ? "var(--red)" : "transparent",
+        ring: selected ? "inset 0 0 0 1px var(--accent-dim)" : "none",
+        onPick: () => this.setState({ sel: i, detailOpen: true }),
+      };
+    });
+    V.resultCount = q ? this.fmtNum(filtered.length) + " of " + this.fmtNum(s.msgTotal) : this.fmtNum(s.msgTotal) + " messages";
+    V.onDeepSearch = () => this.setState({ scope: "Deep", deepOpen: true, deepPct: 6, deepResults: [], deepElapsed: 0 });
+
+    /* ── detail ── */
+    const selRow = filtered[s.sel % Math.max(1, filtered.length)] || s.rows[0];
+    V.detailOpen = s.detailOpen && !!selRow;
+    V.detailH = s.detailH + "px";
+    V.onCloseDetail = () => this.setState({ detailOpen: false });
+    V.onDragDetail = (e) => this.drag(e, "detailH", 120, 620, true);
+    V.detailTabs = [["body", "Body"], ["properties", "Properties"], ["raw", "Raw"]].map(([k, label]) => ({
+      label, fg: s.detailTab === k ? "var(--text)" : "var(--muted)",
+      edge: s.detailTab === k ? "var(--accent)" : "transparent",
+      onPick: () => this.setState({ detailTab: k }),
+    }));
+    V.detailActions = [
+      { label: "Copy body", key: "⌘C", onClick: () => this.flash("Body copied · 1.4 KB") },
+      { label: "Copy as cURL", key: "⇧⌘C", onClick: () => this.flash("cURL copied") },
+      { label: "Use as publish template", key: "⌘T", onClick: () => this.setState({ pubOpen: true }) },
+    ];
+    const isLarge = selRow && selRow.flag === "large" && !s.loadedPayloads[selRow.id];
+    const isEvicted = selRow && selRow.flag === "evicted";
+    const bodyTab = s.detailTab === "body";
+    V.detailPlaceholder = bodyTab && (isLarge || isEvicted);
+    V.showBody = bodyTab && !isLarge && !isEvicted;
+    V.showProps = s.detailTab === "properties";
+    V.showRaw = s.detailTab === "raw";
+    V.phTitle = isEvicted ? "payload evicted" : selRow ? this.fmtSize(selRow.kb) + " payload" : "";
+    V.phAccent = isEvicted ? "var(--dim)" : "var(--amber)";
+    V.phHasAction = !!isLarge;
+    V.phNote = isEvicted
+      ? "Payload evicted to stay within the 2 GB storage cap. Metadata is still searchable."
+      : "Large payloads are not rendered automatically.";
+    V.onLoadPayload = () => this.setState({ confirm: selRow.id });
+    const rawLines = selRow ? this.bodyLinesFor(selRow) : [];
+    let lineNo = 0;
+    V.bodyLines = rawLines.map((l) => {
+      lineNo++;
+      const opens = l.val === "{" || l.val === "[";
+      return {
+        n: lineNo,
+        indents: Array.from({ length: l.depth }, (_, i) => i),
+        hasCaret: opens, noCaret: !opens, caret: "▾",
+        onToggle: () => {},
+        hasKey: !!l.key, key: l.key, val: l.val,
+        isStr: l.kind === "str", isNum: l.kind === "num", isLit: l.kind === "lit", isPunct: l.kind === "punct",
+        onPin: (e) => { e.stopPropagation(); this.setState({ pinned: true }); this.flash("Pinned " + l.key.replace(/"/g, "") + " as column"); },
+      };
+    });
+    V.propSections = [
+      { label: "System properties", rows: [
+        { k: "message-id", v: selRow ? selRow.corrFull : "" },
+        { k: "correlation-id", v: selRow ? selRow.corrFull : "" },
+        { k: "enqueued-time-utc", v: selRow ? "2026-08-28T" + this.fmtTime(selRow.t).slice(0, 8) + "Z" : "" },
+        { k: "sequence-number", v: "4,418,209" },
+        { k: "delivery-count", v: selRow && selRow.flag === "dl" ? "10 (dead-lettered)" : "1" },
+        { k: "content-type", v: "application/json; charset=utf-8" },
+        { k: "partition-key", v: "acme-corp" },
+        { k: "size", v: selRow ? this.fmtSize(selRow.kb) : "" },
+      ] },
+      { label: "Application properties", rows: [
+        { k: "x-tenant", v: "acme-corp" },
+        { k: "x-schema-version", v: "2" },
+        { k: "x-source-service", v: "order-api@1.42.0" },
+        { k: "traceparent", v: "00-4bf92f3577b34da6a3ce929d0e0e4736-01" },
+        { k: "x-retry", v: "false" },
+      ] },
+    ];
+    V.rawText = selRow ? (isEvicted ? "<payload evicted>" : selRow.body + ',"traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-01","tenant":"acme-corp","schemaVersion":2,"lines":[{"sku":"SKU-40192","qty":2,"unitPrice":42.80},{"sku":"SKU-99120","qty":1,"unitPrice":42.80}]}') : "";
+
+    /* ── publisher ── */
+    V.pubOpen = s.pubOpen;
+    V.pubH = s.pubH + "px";
+    V.onDragPub = (e) => this.drag(e, "pubH", 160, 640, true);
+    const synth = { guid: 1, datetime: 1, enum: 1 };
+    V.pubRows = s.pubRows.map((r, i) => ({
+      key: r.key, type: r.type, value: r.tokens.length ? r.tokens[0] : r.value,
+      locked: r.tokens.length > 0,
+      valueFg: r.tokens.length ? "var(--dim)" : "var(--text)",
+      indents: Array.from({ length: r.depth }, (_, k) => k),
+      typeBg: synth[r.type] ? "var(--accent-tint)" : "transparent",
+      typeFg: synth[r.type] ? "var(--accent)" : "var(--muted)",
+      typeEdge: synth[r.type] ? "var(--accent-dim)" : "var(--line-2)",
+      tokens: r.tokens.map(t => ({ t })),
+      noTokens: r.tokens.length === 0,
+      bg: s.pubHover === i ? "var(--hover)" : "transparent",
+      hovered: s.pubHover === i,
+      onEnter: () => this.setState({ pubHover: i }),
+      onLeave: () => this.setState({ pubHover: -1 }),
+      onKey: (e) => { const rows = s.pubRows.slice(); rows[i] = Object.assign({}, rows[i], { key: e.target.value }); this.setState({ pubRows: rows }); },
+      onValue: (e) => { const rows = s.pubRows.slice(); rows[i] = Object.assign({}, rows[i], { value: e.target.value }); this.setState({ pubRows: rows }); },
+      onAddSibling: () => { const rows = s.pubRows.slice(); rows.splice(i + 1, 0, { depth: r.depth, key: "newField", type: "string", value: "", tokens: [] }); this.setState({ pubRows: rows }); },
+      onAddChild: () => { const rows = s.pubRows.slice(); rows.splice(i + 1, 0, { depth: r.depth + 1, key: "child", type: "string", value: "", tokens: [] }); this.setState({ pubRows: rows }); },
+      onDup: () => { const rows = s.pubRows.slice(); rows.splice(i + 1, 0, Object.assign({}, r)); this.setState({ pubRows: rows }); },
+      onDelete: () => { const rows = s.pubRows.slice(); rows.splice(i, 1); this.setState({ pubRows: rows }); },
+    }));
+    V.pubTabs = [["payload", "Payload"], ["envelope", "Envelope"]].map(([k, label]) => ({
+      label, fg: s.pubTab === k ? "var(--text)" : "var(--muted)",
+      edge: s.pubTab === k ? "var(--accent)" : "transparent",
+      onPick: () => this.setState({ pubTab: k }),
+    }));
+    V.showPayloadPreview = s.pubTab === "payload";
+    V.showEnvelope = s.pubTab === "envelope";
+    let pn = 0;
+    V.previewLines = s.pubRows.map((r) => {
+      pn++;
+      const gen = r.tokens.length > 0;
+      const isObj = r.type === "object" || r.type === "array";
+      const val = gen ? this.resolveToken(r.tokens[0]) : isObj ? (r.type === "array" ? "[" : "{") : r.type === "string" ? '"' + r.value + '"' : r.value;
+      const kind = gen ? (val.charAt(0) === '"' ? "str" : "num") : isObj ? "punct" : r.type === "number" ? "num" : r.type === "string" ? "str" : "lit";
+      return {
+        n: pn, indents: Array.from({ length: r.depth }, (_, k) => k),
+        hasKey: !!r.key && r.key !== "{", key: r.key ? '"' + r.key + '"' : "",
+        val, isStr: kind === "str", isNum: kind === "num", isLit: kind === "lit", isPunct: kind === "punct",
+        edge: gen ? "var(--amber)" : "transparent",
+        bg: gen ? "var(--amber-tint)" : "transparent",
+      };
+    });
+    V.envelope = [
+      { k: "content-type", v: "application/json; charset=utf-8" },
+      { k: "partition key", v: "{{ref:$.tenant}} → acme-corp" },
+      { k: "session id", v: "—" },
+      { k: "time to live", v: "14 days" },
+      { k: "correlation id", v: "{{guid}} → 3f9a1c02-…-2e77" },
+      { k: "app property", v: "x-tenant = acme-corp" },
+      { k: "app property", v: "x-source = eventscope" },
+    ];
+    const invalid = s.pubRows.some(r => r.tokens.some(t => t.indexOf("{{ref:$.missing") === 0));
+    V.validFg = invalid ? "var(--red)" : "var(--green)";
+    V.validText = invalid ? "Invalid: unresolved {{ref:$.missing}} at line 8" : "✓ Valid JSON · 1.4 KB";
+    V.burst = String(s.burst);
+    V.onBurstChange = (e) => this.setState({ burst: parseInt(e.target.value, 10) || 0 });
+    V.onBurstUp = () => this.setState({ burst: s.burst + 10 });
+    V.onBurstDown = () => this.setState({ burst: Math.max(1, s.burst - 10) });
+    V.onBurst = () => this.flash("Published " + s.burst + " messages to " + V.entityName);
+    V.onPublish = () => this.flash("Published 1 message to " + V.entityName);
+    V.onRegenerate = () => { this.setState({ regen: (s.regen || 0) + 1 }); this.flash("Generators re-rolled"); };
+
+    /* ── status bar ── */
+    const nearCap = s.diskUsed / (s.capMb / 1000) > 0.9;
+    V.statTotal = this.fmtNum(s.msgTotal) + " messages";
+    V.statDisk = s.diskUsed.toFixed(2) + " / " + (s.capMb / 1000).toFixed(2) + " GB";
+    V.capPct = Math.min(100, Math.round(s.diskUsed / (s.capMb / 1000) * 100)) + "%";
+    V.capFg = nearCap ? "var(--amber)" : "var(--muted)";
+    V.statRetention = s.retention + "-day retention";
+    V.statLag = "index lag " + s.lag + "ms";
+    V.connText = s.run === "error" ? "disconnected" : s.run === "connecting" ? "connecting" : s.run === "streaming" ? "connected" : "idle";
+    V.connDot = s.run === "error" ? "var(--red)" : s.run === "streaming" ? "var(--green)" : s.run === "connecting" ? "var(--amber)" : "var(--dim)";
+    V.connFg = s.run === "error" ? "var(--red)" : "var(--muted)";
+
+    /* ── deep search ── */
+    V.deepOpen = s.deepOpen;
+    V.deepQuery = s.query || "OR-88421";
+    V.deepPct = s.deepPct + "%";
+    V.deepStatus = "Scanned " + s.deepScanned + " MB of 1,884 MB · " + s.deepMatches + " matches · " + s.deepElapsed.toFixed(1) + "s elapsed";
+    V.deepResults = s.deepResults.filter(Boolean).map(r => ({
+      time: this.fmtTime(r.t), subject: r.subject, preview: r.body, size: this.fmtSize(r.kb),
+    }));
+    V.onCancelDeep = () => this.setState({ deepOpen: false, scope: "Live" });
+
+    /* ── dialog ── */
+    V.dialogOpen = !!s.dialog;
+    V.dialogTitle = "New connection";
+    V.dialogIsSqs = s.dialogBroker === "sqs";
+    V.dialogBrokers = [["kafka", "Kafka"], ["asb", "Azure Service Bus"], ["sqs", "AWS SQS"]].map(([k, label]) => ({
+      label, fg: s.dialogBroker === k ? "var(--text)" : "var(--muted)",
+      bg: s.dialogBroker === k ? "var(--surf)" : "transparent",
+      edge: s.dialogBroker === k ? "var(--accent)" : "transparent",
+      onPick: () => this.setState({ dialogBroker: k, test: "idle" }),
+    }));
+    V.dialogFields = fieldsFor(s.dialogBroker).map(f => Object.assign({ ph: "", onChange: () => {} }, f));
+    V.onCloseDialog = () => this.setState({ dialog: null });
+    V.onSaveDialog = () => this.setState({ dialog: null, screen: "workspace", broker: s.dialogBroker, run: "connecting", devState: "connecting", mode: s.dialogBroker === "sqs" ? "consume" : "peek" });
+
+    /* ── settings ── */
+    V.settingsOpen = s.settingsOpen;
+    V.onOpenSettings = () => this.setState({ settingsOpen: true });
+    V.onCloseSettings = () => this.setState({ settingsOpen: false });
+    V.capMb = String(s.capMb);
+    V.onCapChange = (e) => this.setState({ capMb: parseInt(e.target.value, 10) || 500 });
+    V.retention = String(s.retention);
+    V.onRetentionChange = (e) => this.setState({ retention: parseInt(e.target.value, 10) || 1 });
+    const used = s.diskUsed * 1000;
+    V.allocPayloads = Math.round(used * 0.68 / s.capMb * 100) + "%";
+    V.allocMeta = Math.round(used * 0.19 / s.capMb * 100) + "%";
+    V.allocIndex = Math.round(used * 0.13 / s.capMb * 100) + "%";
+    V.allocLegend = [
+      { label: "payloads " + Math.round(used * 0.68) + " MB", color: "var(--accent-dim)" },
+      { label: "metadata " + Math.round(used * 0.19) + " MB", color: "var(--accent)" },
+      { label: "index " + Math.round(used * 0.13) + " MB", color: "var(--muted)" },
+    ];
+    V.prefixOpts = ["Off", "512 B", "2 KB", "8 KB"].map(label => {
+      const sel = s.prefix === label;
+      return { label, fg: sel ? "var(--accent)" : "var(--muted)", bg: sel ? "var(--accent-tint)" : "transparent", ring: sel ? on : "none", onPick: () => this.setState({ prefix: label }) };
+    });
+    const est = { "Off": 1240000, "512 B": 910000, "2 KB": 660000, "8 KB": 305000 }[s.prefix];
+    V.prefixEstimate = "≈ " + this.fmtNum(est) + " messages at current settings.";
+    V.overrides = [
+      { name: "prod-eu-orders", prefix: "8 KB", retention: "20 d" },
+      { name: "payments-sb", prefix: "2 KB", retention: "20 d" },
+      { name: "ledger-dlq", prefix: "Off", retention: "7 d" },
+    ];
+    V.sessionFiles = ["2026-08-28", "2026-08-27", "2026-08-26", "2026-08-25", "2026-08-24"].map((d, i) => ({
+      name: d + ".escope", size: (420 - i * 63) + " MB", onDelete: () => this.flash("Deleted " + d + ".escope"),
+    }));
+
+    /* ── confirm + toast ── */
+    V.confirmOpen = !!s.confirm;
+    const cRow = s.rows.find(r => r.id === s.confirm);
+    V.confirmSize = cRow ? this.fmtSize(cRow.kb) : "";
+    V.confirmDelay = cRow ? (cRow.kb / 1400).toFixed(1) + "s" : "";
+    V.onCancelConfirm = () => this.setState({ confirm: null });
+    V.onConfirmLoad = () => this.setState({ confirm: null, loadedPayloads: Object.assign({}, s.loadedPayloads, { [s.confirm]: true }) });
+    V.toastOn = !!s.toast;
+    V.toastText = s.toast || "";
+
+    /* ── dev panel ── */
+    V.devOpen = s.devOpen;
+    V.devLeft = s.screen === "launcher" ? "auto" : "10px";
+    V.devRight = s.screen === "launcher" ? "10px" : "auto";
+    V.devStates = [
+      ["cold", "Cold start"], ["connecting", "Connecting"], ["streaming", "Streaming"],
+      ["paused", "Paused"], ["saturated", "Saturated"], ["error", "Error"],
+      ["emptysearch", "Empty search"], ["deep", "Deep search"], ["nearcap", "Near cap"],
+      ["mixed", "Mixed grid"], ["publisher", "Publisher"], ["split", "Split view"], ["sqs", "SQS destructive"],
+    ].map(([k, label], i) => ({
+      n: i + 1, label,
+      bg: s.devState === k ? "var(--accent-tint)" : "transparent",
+      fg: s.devState === k ? "var(--accent)" : "var(--text)",
+      onPick: () => this.setDev(k),
+    }));
+    V.devBrokers = [["kafka", "Kafka tab", "K"], ["asb", "ASB tab", "A"], ["sqs", "SQS tab", "S"]].map(([k, label, glyph]) => ({
+      label, glyph,
+      bg: broker === k ? "var(--accent-tint)" : "transparent",
+      fg: broker === k ? "var(--accent)" : "var(--text)",
+      onPick: () => this.setState({ broker: k, screen: "workspace", mode: k === "sqs" ? "consume" : "peek", bannerDismissed: false }),
+    }));
+
+    return V;
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EventScope.App/EventScope.App.csproj" />
+    <Project Path="src/EventScope.Brokers.Kafka/EventScope.Brokers.Kafka.csproj" />
+    <Project Path="src/EventScope.Brokers.ServiceBus/EventScope.Brokers.ServiceBus.csproj" />
+    <Project Path="src/EventScope.Brokers.Sqs/EventScope.Brokers.Sqs.csproj" />
+    <Project Path="src/EventScope.Core/EventScope.Core.csproj" />
+    <Project Path="src/EventScope.Storage/EventScope.Storage.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EventScope.App.Tests/EventScope.App.Tests.csproj" />
+    <Project Path="tests/EventScope.Bench/EventScope.Bench.csproj" />
+    <Project Path="tests/EventScope.Core.Tests/EventScope.Core.Tests.csproj" />
+    <Project Path="tests/EventScope.Storage.Tests/EventScope.Storage.Tests.csproj" />
+  </Folder>
+</Solution>

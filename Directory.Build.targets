@@ -1,0 +1,24 @@
+<Project>
+
+  <!--
+    Local dev only: Windows Smart App Control has been observed blocking execution of
+    freshly-built, unsigned test binaries on this machine (Code Integrity policy block,
+    not a malware detection). Signing with a local self-signed cert installed into
+    CurrentUser\TrustedPublisher works around it. Debug + Windows + test projects only —
+    this has nothing to do with real release signing, which is a separate concern for the
+    release pipeline (a CA-issued cert or a free OSS signing service).
+
+    Safe no-op on machines without the cert (see build/Sign-LocalTestBinary.ps1) and on
+    non-Windows/CI, so this does not need to be conditional per contributor.
+  -->
+  <Target Name="SignLocalTestBinary"
+          AfterTargets="Build"
+          Condition="'$(IsTestProject)' == 'true' AND '$(OS)' == 'Windows_NT' AND '$(Configuration)' == 'Debug'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Sign-LocalTestBinary.ps1&quot; -Path &quot;$(TargetPath)&quot;"
+          ContinueOnError="WarnAndContinue" />
+    <Exec Condition="Exists('$(TargetDir)$(TargetName).exe') AND '$(TargetPath)' != '$(TargetDir)$(TargetName).exe'"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Sign-LocalTestBinary.ps1&quot; -Path &quot;$(TargetDir)$(TargetName).exe&quot;"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
+</Project>

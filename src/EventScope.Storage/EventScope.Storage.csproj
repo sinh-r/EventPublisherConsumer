@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="K4os.Compression.LZ4.Streams" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EventScope.Core\EventScope.Core.csproj" />
+  </ItemGroup>
+
+</Project>

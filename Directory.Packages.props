@@ -1,0 +1,46 @@
+<Project>
+
+  <PropertyGroup>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Avalonia -->
+    <PackageVersion Include="Avalonia" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Diagnostics" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="11.3.13" />
+    <!-- Avalonia.Controls.TreeDataGrid >= 11.2.0 requires a paid Avalonia Accelerate
+         license (AVLIC0001 at build time). TreeDataGrid.Avalonia is the MIT-licensed
+         community fork of the last free release (11.1.1), versioned to track current
+         Avalonia core releases. -->
+    <PackageVersion Include="TreeDataGrid.Avalonia" Version="11.3.1" />
+    <PackageVersion Include="Avalonia.AvaloniaEdit" Version="11.4.1" />
+    <PackageVersion Include="AvaloniaEdit.TextMate" Version="11.4.1" />
+    <PackageVersion Include="Avalonia.Headless" Version="11.3.20" />
+
+    <!-- MVVM -->
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+
+    <!-- Storage -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageVersion Include="K4os.Compression.LZ4.Streams" Version="1.3.8" />
+
+    <!-- Brokers -->
+    <PackageVersion Include="Confluent.Kafka" Version="2.15.0" />
+    <PackageVersion Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+    <PackageVersion Include="AWSSDK.SQS" Version="4.0.100.11" />
+
+    <!-- Tests -->
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+
+    <!-- Bench -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+</Project>

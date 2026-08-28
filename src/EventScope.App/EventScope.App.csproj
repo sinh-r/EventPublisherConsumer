@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" />
+    <PackageReference Include="TreeDataGrid.Avalonia" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" />
+    <PackageReference Include="AvaloniaEdit.TextMate" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Avalonia.Diagnostics" Condition="'$(Configuration)' == 'Debug'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EventScope.Core\EventScope.Core.csproj" />
+    <ProjectReference Include="..\EventScope.Storage\EventScope.Storage.csproj" />
+    <ProjectReference Include="..\EventScope.Brokers.Kafka\EventScope.Brokers.Kafka.csproj" />
+    <ProjectReference Include="..\EventScope.Brokers.ServiceBus\EventScope.Brokers.ServiceBus.csproj" />
+    <ProjectReference Include="..\EventScope.Brokers.Sqs\EventScope.Brokers.Sqs.csproj" />
+  </ItemGroup>
+
+</Project>

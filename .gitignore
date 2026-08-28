@@ -1,0 +1,28 @@
+## .NET
+bin/
+obj/
+out/
+
+## User-specific
+*.user
+*.suo
+.vs/
+.vscode/
+
+## Rider / ReSharper
+.idea/
+*.DotSettings.user
+
+## Test / bench output
+[Tt]est[Rr]esult*/
+BenchmarkDotNet.Artifacts/
+
+## EventScope runtime data (day files, segments) - never commit captured broker data
+*.db
+*.db-wal
+*.db-shm
+*.segment
+
+## OS
+Thumbs.db
+.DS_Store
