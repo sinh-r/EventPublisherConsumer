@@ -85,7 +85,7 @@ tests/
 | `Avalonia`, `Avalonia.Desktop`, `Avalonia.Themes.Fluent`, `Avalonia.Fonts.Inter` | 11.3.20 | App |
 | `Avalonia.Diagnostics` | 11.3.20 | App, `Condition="'$(Configuration)'=='Debug'"` |
 | `Avalonia.Controls.DataGrid` | 11.3.13 | App — versions independently of core Avalonia; depends on `Avalonia >= 11.3.13`, satisfied by 11.3.20 |
-| `Avalonia.Controls.TreeDataGrid` | 11.3.2 | App — publisher JSON tree, and the grid fallback if the spike fails |
+| `TreeDataGrid.Avalonia` | 11.3.1 | App — publisher JSON tree, and the grid fallback if the spike fails. **Not** `Avalonia.Controls.TreeDataGrid`: that package requires a paid Avalonia Accelerate licence (AVLIC0001) from 11.2.0 onward. This is the MIT community fork of the last free release, versioned to track current Avalonia releases. Corrected during Stage 1. |
 | `Avalonia.AvaloniaEdit` + `AvaloniaEdit.TextMate` | 11.4.1 | App — JSON body view |
 | `Avalonia.Headless` | 11.3.20 | App tests — **not** `.XUnit`, see the test-framework decision above |
 | `CommunityToolkit.Mvvm` | 8.4.2 | App |
@@ -134,19 +134,29 @@ Consequences:
   `Cast<object>().Count()` and item access enumerates from index 0 — O(n) per row
   realization, O(n²) per frame. **The non-generic `IList` is mandatory**; the fast path
   needs `Count`, `IndexOf`, and `this[int]`.
-- **Do not implement `IDataGridCollectionView`.** It has no `Count`/`GetItemAt`, and the
-  fast path type-checks the *concrete* `DataGridCollectionView`. You would get the
-  ceremony with none of the benefit.
-- **It does not auto-wrap**, unlike WPF. That is fortunate:
-  `DataGridCollectionView.CopySourceToInternalList()` materializes the entire source.
+- **Implement `IDataGridCollectionView`.** *Corrected by measurement during Stage 1 —
+  this bullet and the one that followed it previously said the exact opposite.* The
+  original reasoning was that the interface has no `Count`/`GetItemAt` and that the fast
+  path type-checks the *concrete* `DataGridCollectionView`, so implementing it would be
+  ceremony with no benefit; and that `DataGrid`, unlike WPF, does not auto-wrap. Both were
+  wrong for `Avalonia.Controls.DataGrid` 11.3.13. It **does** auto-wrap: any plain `IList`
+  `ItemsSource` is wrapped in its own `DataGridCollectionView`, whose
+  `CopySourceToInternalList()` eagerly enumerates the entire source — measured at **65,536
+  reads at bind time**, the precise catastrophe this design exists to prevent. Implementing
+  `IDataGridCollectionView` directly is what stops `DataGridDataConnection.CreateView` from
+  wrapping at all. Bind-time reads dropped to **15** — one visible screenful — after the
+  change. Sort, filter and group are honest no-ops on our implementation. Keep the
+  non-generic `IList` as well: it is what routes `GetDataItem` through `this[int]`.
 - `DataGrid` does its own row realization and recycling independently of
   `VirtualizingStackPanel`, so **UI virtualization works over any `IEnumerable`** —
   `IList` only makes it fast. We supply the *data* virtualization ourselves.
 
 ```csharp
 public sealed class MessageRowsView
-    : IList,                                  // required for the fast path
+    : IList,                                  // routes GetDataItem through this[int]
       IReadOnlyList<MessageRowViewModel>,     // for our own typed code
+      IDataGridCollectionView,                // stops DataGrid wrapping (and eagerly
+                                              // enumerating) the source - see above
       INotifyCollectionChanged
 ```
 

@@ -2,8 +2,13 @@
 
 **Brief for Claude Code.** Build order, structure, and acceptance criteria.
 
-Read `eventscope-design-plan.md` for architectural rationale before starting.
+Read `eventscope-build-plan.md` for architectural rationale and the authoritative
+build order before starting. Where the two disagree, the build plan wins - it is newer
+and its M1 ordering supersedes section 3 below.
 Read `eventscope-ui-spec.md` for layout and component behaviour.
+
+> **Note.** Earlier revisions of this line pointed at `eventscope-design-plan.md`. No such
+> file exists in this repo; the rationale it referred to lives in `eventscope-build-plan.md`.
 
 > **On the mockup.** A Claude Design HTML/CSS/JS mockup exists. It is a visual
 > reference only. **Do not port its markup, CSS, or JavaScript.** Read it for
@@ -238,7 +243,10 @@ view model objects defeats the whole memory design. Implement a custom
 `IReadOnlyList<T>` + `INotifyCollectionChanged` adapter over `MessageHeader[]`
 that materializes a lightweight row VM only for realized (visible) rows and
 recycles them. This is the single most important correctness detail in the UI
-layer.
+layer. **`IReadOnlyList<T>` alone is not enough** — see `eventscope-build-plan.md`
+§3.1 for the interface set that is actually required (non-generic `IList` *and*
+`IDataGridCollectionView`) and why. Built and measured in Stage 1; see
+`src/EventScope.App/Collections/MessageRowsView.cs`.
 
 **The coalescer must batch the notification, not the data.** Append headers to
 the ring buffer from the writer thread, then raise a single
@@ -269,7 +277,7 @@ IDs.
 | Drag-resizable panes | `Grid` + `GridSplitter` |
 | Segmented control | `ItemsControl` of `RadioButton` with a custom theme |
 | Token chip input | custom `TemplatedControl` over `TextBox` with an overlay `ItemsControl` |
-| JSON tree editor | `TreeDataGrid` (`Avalonia.Controls.TreeDataGrid` package) — closest fit, use hierarchical mode |
+| JSON tree editor | `TreeDataGrid` (`TreeDataGrid.Avalonia` package — the MIT community fork; `Avalonia.Controls.TreeDataGrid` needs a paid Avalonia Accelerate licence at 11.2.0+) — closest fit, use hierarchical mode |
 | Syntax-highlighted JSON | `AvaloniaEdit` with a JSON syntax definition, or a custom `TextBlock` with `Inlines` for small payloads |
 | Collapsible detail pane | `Grid` row with animated `Height` + `GridSplitter` |
 | Toast | `Popup` or a `Panel` overlay in the root `Grid`, not a window |
