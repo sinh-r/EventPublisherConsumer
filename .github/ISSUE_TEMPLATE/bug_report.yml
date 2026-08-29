@@ -1,0 +1,77 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        EventScope is pre-alpha. Please check `Docs/PROGRESS.md` first — the feature may
+        not be built yet.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect to ...
+        2. Start consuming ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: broker
+    attributes:
+      label: Broker
+      options:
+        - Kafka (Apache)
+        - Kafka (Confluent)
+        - Kafka (Oracle)
+        - Azure Service Bus
+        - AWS SQS
+        - Not broker-specific
+    validations:
+      required: true
+
+  - type: textarea
+    id: load
+    attributes:
+      label: Load characteristics
+      description: >
+        Required for anything involving throughput, memory, or grid responsiveness.
+        These three determine almost everything about behaviour under load.
+      placeholder: |
+        Message rate: ~2,000 msg/s
+        Payload size: ~4 KB average
+        Run duration before the problem appeared: ~5 minutes
+
+  - type: input
+    id: version
+    attributes:
+      label: EventScope version
+      description: From the status bar, or the commit hash if you built from source.
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 23H2 (22631.3593)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or stack trace
+      description: Redact any connection strings, SAS tokens or AWS credentials first.
+      render: text

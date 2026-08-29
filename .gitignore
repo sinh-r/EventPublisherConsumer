@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+publish/
 
 ## User-specific
 *.user
@@ -22,6 +23,12 @@ BenchmarkDotNet.Artifacts/
 *.db-wal
 *.db-shm
 *.segment
+
+## Local secrets - never commit broker connection strings, SAS tokens or AWS keys
+*.secrets.json
+appsettings.*.Local.json
+.env
+.env.*
 
 ## OS
 Thumbs.db

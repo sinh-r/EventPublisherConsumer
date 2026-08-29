@@ -1,0 +1,103 @@
+# Builds the single-file Windows binary, attests its provenance, publishes a SHA256
+# alongside it, and attaches everything to a GitHub Release.
+#
+# See Docs/DISTRIBUTION_PLAN.md. Two things this workflow is deliberately doing:
+#
+#  1. The provenance attestation and published hash are not cosmetic. They give
+#     security-conscious users something verifiable while the binary is still unsigned, and
+#     they demonstrate a clean repo-to-binary path during the SignPath Foundation review.
+#  2. Release artifacts are built here and only here. SignPath verifies binaries came from
+#     CI, so never build a release locally and upload it by hand.
+#
+# The SignPath signing step goes between "Upload unsigned artifact" and "Create release"
+# once the application is approved: submit a signing request referencing the uploaded
+# artifact, wait for it, download the signed binary back, and attach THAT to the release -
+# recomputing the SHA256 afterwards, because signing changes the hash. Check SignPath's
+# current documentation for the action name and inputs rather than assuming; they have
+# changed across versions.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore EventScope.slnx
+
+      # Do not ship a build that does not pass its own tests. See build/Run-Tests.ps1
+      # for why this is not `dotnet test`.
+      - name: Test
+        shell: pwsh
+        run: ./build/Run-Tests.ps1 -Configuration Release
+
+      # Publish switches live here rather than in the csproj: setting RuntimeIdentifier in
+      # the project file makes every build RID-specific. IncludeNativeLibrariesForSelfExtract
+      # is load-bearing - Microsoft.Data.Sqlite bundles native e_sqlite3 and Confluent.Kafka
+      # bundles librdkafka, and without it the single-file exe fails at runtime, not at build
+      # time. Trimming and AOT stay off: the broker SDKs are reflection-heavy.
+      - name: Publish
+        run: >
+          dotnet publish src/EventScope.App/EventScope.App.csproj
+          -c Release
+          -r win-x64
+          --self-contained
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -o publish
+
+      - name: Verify the expected artifact exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path publish/EventScope.exe)) {
+            Get-ChildItem publish
+            throw "publish/EventScope.exe not found - check <AssemblyName> in EventScope.App.csproj"
+          }
+          Get-Item publish/EventScope.exe | Select-Object Name, Length
+
+      - name: Upload unsigned artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned
+          path: publish/EventScope.exe
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: publish/EventScope.exe
+
+      - name: Compute SHA256
+        shell: pwsh
+        run: |
+          Get-FileHash publish/EventScope.exe -Algorithm SHA256 |
+            Select-Object -ExpandProperty Hash |
+            Out-File -Encoding ascii publish/EventScope.exe.sha256
+          Get-Content publish/EventScope.exe.sha256
+
+      # Tag pushes cut a release. A manual workflow_dispatch run stops short of that, so the
+      # workflow can be exercised end to end without burning a version number.
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            publish/EventScope.exe
+            publish/EventScope.exe.sha256
+          generate_release_notes: true

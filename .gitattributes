@@ -1,0 +1,25 @@
+# Normalize line endings on commit; check out native.
+* text=auto
+
+# Windows-only files stay CRLF in the working tree.
+*.ps1     text eol=crlf
+*.cmd     text eol=crlf
+*.bat     text eol=crlf
+*.sln     text eol=crlf
+*.slnx    text eol=crlf
+*.csproj  text eol=crlf
+*.props   text eol=crlf
+*.targets text eol=crlf
+*.manifest text eol=crlf
+
+# Shell scripts must stay LF even on Windows.
+*.sh      text eol=lf
+
+# Treat these as binary so git never mangles them.
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.db  binary
+*.segment binary

@@ -13,4 +13,21 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <!--
+    Shared assembly identity. Consistent metadata matters for SmartScreen reputation and
+    for the SignPath Foundation review - see Docs/DISTRIBUTION_PLAN.md, Phase 1. The
+    publisher name users actually see comes from the signing certificate, not from here.
+    Version is bumped here, in one place, per release tag.
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Company>rsrishabh007</Company>
+    <Authors>rsrishabh007</Authors>
+    <Copyright>Copyright (c) 2026 rsrishabh007</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/rsrishabh007/EventScope</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
 </Project>

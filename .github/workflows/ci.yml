@@ -1,0 +1,50 @@
+# Build and test on every push and pull request.
+#
+# Docs/eventscope-implementation-plan.md section 7 assumes a CI exists ("fail CI on >20%
+# regression" for the EventScope.Bench baselines) but never specified one. This is it. The
+# benchmark gate is not wired up yet - EventScope.Bench is still a stub - so this currently
+# builds and tests only. Add the baseline comparison when the bench harness lands in M1.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          # Reads the pinned SDK from global.json rather than hardcoding a version here,
+          # so there is one place to bump it.
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore EventScope.slnx
+
+      - name: Build
+        run: dotnet build EventScope.slnx -c Release --no-restore
+
+      # NOT `dotnet test` - it reports "Zero tests ran" for every assembly on this
+      # toolchain (xunit.v3 4.0.0 / Microsoft.Testing.Platform 2.3.3 / SDK 10.0.400).
+      # build/Run-Tests.ps1 runs the xUnit v3 test executables directly and explains why
+      # in its header. Revisit after an xunit.v3 or MTP bump.
+      #
+      # Broker integration tests are opt-in via EVENTSCOPE_KAFKA_BOOTSTRAP and friends.
+      # None are set here, so they skip themselves and the suite runs without a broker.
+      - name: Test
+        shell: pwsh
+        run: ./build/Run-Tests.ps1 -Configuration Release -NoBuild

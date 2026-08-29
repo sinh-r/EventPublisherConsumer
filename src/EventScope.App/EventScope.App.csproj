@@ -4,6 +4,29 @@
     <OutputType>WinExe</OutputType>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!--
+      The published binary is EventScope.exe, not EventScope.App.exe. Every path in
+      Docs/DISTRIBUTION_PLAN.md and in the Scoop manifest depends on this name, and the
+      name is part of the publisher reputation that accrues across releases - do not
+      change it casually.
+    -->
+    <AssemblyName>EventScope</AssemblyName>
+    <RootNamespace>EventScope.App</RootNamespace>
+
+    <Product>EventScope</Product>
+    <AssemblyTitle>EventScope</AssemblyTitle>
+    <Description>Cloud-agnostic event publisher and subscriber for Azure Service Bus, AWS SQS and Kafka</Description>
+
+    <!--
+      Publish switches live on the dotnet publish command line, not here - see
+      Docs/DISTRIBUTION_PLAN.md, "Publish configuration". Setting RuntimeIdentifier in the
+      project file makes every build RID-specific. These two are the exception: they are
+      hard requirements rather than per-invocation choices, because the broker SDKs are
+      reflection-heavy and both trimming and AOT break them in non-obvious ways at runtime.
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishAot>false</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

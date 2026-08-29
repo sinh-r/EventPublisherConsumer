@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest something EventScope should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check `Docs/PROGRESS.md` and `Docs/eventscope-build-plan.md` first — a lot is
+        planned but not yet built, and it may already be on the roadmap.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: Describe the situation you are in, not just the feature you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Consumer / message grid
+        - Search
+        - Publisher
+        - Connection management
+        - Storage and retention
+        - Broker support
+        - Other
+    validations:
+      required: true

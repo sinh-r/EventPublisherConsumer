@@ -56,6 +56,12 @@ real UI is built on top of it.
   an automatic post-build signing step (`Directory.Build.targets` +
   `build/Sign-LocalTestBinary.ps1`) that signs every test project's output on Windows
   Debug builds. Confirmed working — no change needed to `CurrentUser\Root`.
+- **Later measurement partly overtakes this.** Smart App Control no longer blocks
+  freshly-built unsigned binaries on this machine - the unsigned Release test binaries and
+  the unsigned published `EventScope.exe` both run, the latter even with Mark-of-the-Web
+  attached, while SAC is still in enforcement. Whatever triggered the original block is no
+  longer triggering. The workaround stays as an inert fallback rather than being deleted
+  mid-flight; see item 2 under **Blocked / needs a decision**.
 - This is explicitly **not** a substitute for real release signing. Distributing a
   built `.exe` publicly (e.g. off a GitHub release) will need actual CA-chained signing
   for end users to not get blocked the same way — see **Blocked / needs a decision**
@@ -78,6 +84,45 @@ real UI is built on top of it.
 
 ---
 
+### Release readiness and doc reconciliation (this pass)
+
+Distribution work brought forward so every later commit is releasable. See
+`DISTRIBUTION_PLAN.md`, whose placeholders are now all filled in.
+
+- **Naming settled.** `EventScope` / `rsrishabh007` / repo `EventScope`, MIT licensed.
+  `EventScope.App.csproj` now sets `<AssemblyName>EventScope</AssemblyName>` so the
+  published binary is `EventScope.exe`, not `EventScope.App.exe`.
+  **Carry into M1:** this changes the `avares://` root. Themes and other XAML resources
+  must be referenced as `avares://EventScope/...`, not `avares://EventScope.App/...`.
+  Nothing references it today, so nothing broke.
+- **Assembly metadata.** Version 0.1.0, company, authors, copyright, repository URL and
+  MIT expression in `Directory.Build.props`; product/title/description in the app csproj;
+  `app.manifest` realigned from 1.0.0.0 to 0.1.0.0.
+- **Single-file publish verified.** `publish/EventScope.exe`, 123 MB, self-contained
+  win-x64, launches. The feared `TreatWarningsAsErrors` / IL3000-IL3002 collision did not
+  materialise. Publish switches deliberately live on the command line, not in the csproj,
+  because `RuntimeIdentifier` in a project file makes every build RID-specific.
+- **OSS files.** `LICENSE` (MIT), `README.md`, `CONTRIBUTING.md`, `.gitattributes`,
+  `.github/ISSUE_TEMPLATE/`. `.gitignore` extended with `publish/` and secret patterns.
+- **CI.** `.github/workflows/ci.yml` (build + test on push/PR) and `release.yml` (publish,
+  provenance attestation, SHA256, release on tag; `workflow_dispatch` stops short of
+  cutting a release). Every action version in the original plan was stale - checkout is on
+  v7, setup-dotnet v6, upload-artifact v7, attest-build-provenance v4, action-gh-release
+  v3. **Neither workflow has run yet; there is no remote.**
+- **Deliberately not tagged `v0.1.0`.** The app is still the empty Avalonia template.
+  Tagging now would burn the version on an artifact that does nothing. Tag at the end of M1.
+- **Secret audit clean.** No credentials in the single commit of history, no config files
+  tracked.
+- **Docs reconciled** against what the Stage 1 spike actually measured:
+  - Build plan section 2 package table corrected to `TreeDataGrid.Avalonia` 11.3.1.
+  - Build plan section 3.1 said "do not implement `IDataGridCollectionView`" - inverted,
+    with the measurement, because that guidance is the opposite of what works.
+  - `eventscope-implementation-plan.md` pointed at a non-existent
+    `eventscope-design-plan.md`; now points at the build plan and states it is
+    authoritative where the two disagree.
+
+---
+
 ## Pending — in build-plan order
 
 - **M1 — Kafka consumer, end to end.** Not started beyond the abstractions above:
@@ -95,29 +140,70 @@ real UI is built on top of it.
   capability-binding audit (no `if (broker == …)` in the view layer).
 - **Stage 5 — polish.** Connection manager + per-broker forms, deep-search overlay,
   large-payload confirmation, toast, light theme, full keyboard map.
-- **Release engineering — real code signing.** Not started; deliberately deferred (see
-  below).
+- **Release engineering — real code signing.** Repo prep, publish config and both CI
+  workflows are now done (see above); what remains is the SignPath Foundation application
+  and the signing step in `release.yml`, deliberately deferred until v0.1.0 ships at the
+  end of M1.
 
 ---
 
 ## Blocked / needs a decision from you
 
-Nothing is blocking the next unit of implementation work (M1) right now. Two things need
-your input later, not immediately:
+Nothing blocks starting M1. Ordered by how soon it matters.
 
-1. **Release signing for distributed builds.** The local dev signing workaround above
-   only helps this machine — it does nothing for someone downloading a built `.exe` from
-   GitHub. For that, Smart App Control and SmartScreen need a real CA-chained signature.
-   The practical no-cost path for an open-source project is **SignPath.io**'s free
-   code-signing program, wired into the release CI pipeline. This is a release-pipeline
-   task, not something to set up now — flagging it here so it isn't forgotten before the
-   first public release.
-2. **No live broker access on this machine.** Kafka/ASB/SQS source implementations will
-   be written and unit-tested against mocked client surfaces per the build plan; the
-   integration tests that hit a real broker are opt-in via environment variables
-   (`EVENTSCOPE_KAFKA_BOOTSTRAP`, etc.) and skipped by default. If you want these proven
-   against a real broker before M4 is considered "done," that needs a broker endpoint to
-   point at.
+1. **`dotnet test` does not work on this toolchain. Tests run via `build/Run-Tests.ps1`.**
+   Found this pass, and it predates any change made here - it reproduces on the pristine
+   initial commit. On the .NET 10 SDK, VSTest is gone: `Microsoft.Testing.Platform.MSBuild`
+   fails the build with *"Testing with VSTest target is no longer supported"*, so MTP is
+   mandatory and `global.json` opts into it. But `dotnet test` then launches each assembly
+   in MTP server mode (`--server dotnettestcli --dotnet-test-pipe ...`) and every one
+   reports **"Zero tests ran", exit code 5** - including assemblies whose tests
+   demonstrably pass. Confirmed against xunit.v3 4.0.0 / Microsoft.Testing.Platform 2.3.3 /
+   SDK 10.0.400, with and without `Microsoft.NET.Test.Sdk` and `xunit.runner.visualstudio`,
+   and with `OutputType=Exe` set explicitly. xunit own MTP documentation says no project
+   properties are needed on .NET 10; that documented configuration reproduces the bug.
+   Running the test executables directly works and is xUnit v3 native model, so
+   `build/Run-Tests.ps1` does that, and both workflows call it instead of `dotnet test`.
+   The suite is **5 tests, all passing** (4 App.Tests, 1 Core.Tests; Storage.Tests is still
+   empty). *Revisit after an xunit.v3 or MTP version bump - if it starts working, delete
+   the script and put `dotnet test` back.*
 
-GitHub repository creation and the initial push are intentionally left to you, per your
-instruction — this pass stops at a clean local commit.
+2. **Smart App Control is not the blocker it was predicted to be.** Measured this pass, and
+   it contradicts the earlier assumption. SAC is genuinely in enforcement
+   (`VerifiedAndReputablePolicyState = 1`, `SAC_PreviousState = 2`,
+   `SAC_EnforcementReason = 1`), yet the unsigned, self-contained 123 MB
+   `publish/EventScope.exe` launches fine - **including with Mark-of-the-Web attached**,
+   the way a real downloader receives it. Unsigned Release-configuration test binaries
+   (which the local signing target does not touch) also run. So the predicted "SAC will
+   block the app at M1 step 6" does not happen.
+   **Consequence:** `DISTRIBUTION_PLAN.md` Phase 0 says to turn SAC off, which is a one-way
+   switch that can only be undone by reinstalling Windows. The justification for doing that
+   has not materialised, so it is **not recommended right now**. Revisit only if something
+   actually gets blocked. The self-signed local signing workaround
+   (`Directory.Build.targets` + `build/Sign-LocalTestBinary.ps1`) stays as an inert
+   fallback; it no-ops without the cert and only ever touches Debug test binaries.
+
+3. **Mockup bundle redistribution is unresolved, and blocks making the repo public.**
+   `Mockup preparation from spec/support.js` is 69 KB of generated Claude Design runtime
+   (`dc-runtime`), marked "GENERATED ... do not edit", with no licence header. Its
+   redistribution terms under this repo MIT licence are not something the code can settle.
+   `styles.css` alongside it is bespoke to this project and fine; `_ds_bundle.js` is a
+   300-byte empty stub. The build plan manual verification step opens the mockup in a
+   browser throughout the build, and it needs `support.js` to render, so it is useful
+   locally. **Decide before going public:** keep it, or gitignore it and keep it local
+   only. Nothing is blocked while the repo is private.
+
+4. **Release signing for distributed builds.** Unchanged. SignPath Foundation free
+   open-source programme is the intended no-cost path, wired into `release.yml` between the
+   upload-artifact and create-release steps. Deliberately deferred until v0.1.0 exists -
+   their review assesses a working project, and applying with an empty scaffold weakens it.
+   Recompute the SHA256 after signing; signing changes the hash.
+
+5. **No live broker access on this machine.** Unchanged. Broker sources are written and
+   unit-tested against mocked client surfaces; integration tests are opt-in via
+   `EVENTSCOPE_KAFKA_BOOTSTRAP` and friends and skipped by default. If you want these proven
+   against a real broker before M4 is "done", that needs a broker endpoint to point at.
+
+GitHub repository creation and the initial push remain yours. There is still no remote, so
+neither workflow has ever executed - expect the first push to surface ordinary CI teething
+issues (the YAML could not be validated locally; no YAML parser is installed).
