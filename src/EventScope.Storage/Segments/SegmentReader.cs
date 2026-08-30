@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using K4os.Compression.LZ4;
 using Microsoft.Win32.SafeHandles;
@@ -28,10 +29,30 @@ namespace EventScope.Storage.Segments;
 /// signals to the caller, identical in shape to <see cref="IPayloadReader"/>'s documented
 /// contract.
 /// </para>
+///
+/// <para>
+/// <b>Decompressed-block cache.</b> Every read used to decompress and allocate the whole
+/// ~1&#160;MB containing block regardless of the requested payload's size — measured at
+/// ~1.7&#8211;2&#160;GB allocated across 1,000 random reads in
+/// <c>tests/EventScope.Bench/SegmentReadBenchmarks</c>, since packed payloads mean
+/// consecutive random-offset reads mostly miss whatever the previous read touched. A block's
+/// bytes are immutable once written (<see cref="SegmentWriter"/> only ever appends new
+/// blocks, never rewrites one), so caching the decompressed bytes keyed by
+/// <c>(segmentId, block's uncompressed start)</c> is safe indefinitely, including for a still
+/// -live (unsealed) segment. Bounded by <see cref="BlockCacheCapacity"/> blocks with
+/// approximate (not strict) LRU eviction — approximate is enough for a read cache and avoids
+/// the synchronization a true LRU would need under concurrent readers.
+/// </para>
 /// </summary>
-public sealed class SegmentReader(string directory) : IPayloadReader, IDisposable
+public sealed class SegmentReader(string directory, int blockCacheCapacity = 64) : IPayloadReader, IDisposable
 {
+    /// <summary>Max decompressed blocks retained at once, ~<see cref="SegmentFormat.BlockSize"/>
+    /// each — the default bounds the cache at roughly 64 MB.</summary>
+    public int BlockCacheCapacity { get; } = blockCacheCapacity;
+
     private readonly ConcurrentDictionary<int, CachedSegment> _cache = new();
+    private readonly ConcurrentDictionary<(int SegmentId, long BlockStart), byte[]> _blockCache = new();
+    private readonly ConcurrentQueue<(int SegmentId, long BlockStart)> _blockCacheOrder = new();
     private bool _disposed;
 
     public async ValueTask<ReadOnlyMemory<byte>> ReadAsync(MessageHeader header, CancellationToken cancellationToken)
@@ -48,17 +69,8 @@ public sealed class SegmentReader(string directory) : IPayloadReader, IDisposabl
         var entry = block.Value;
         if (entry.CompressedLength == 0) return ReadOnlyMemory<byte>.Empty; // an empty payload, stored as such
 
-        var compressed = new byte[entry.CompressedLength];
-        await RandomAccess.ReadAsync(cached.Handle, compressed, entry.CompressedStart, cancellationToken)
+        var uncompressed = await GetOrDecodeBlockAsync(cached, header.SegmentId, entry, cancellationToken)
             .ConfigureAwait(false);
-
-        var uncompressed = new byte[entry.UncompressedLength];
-        var written = LZ4Codec.Decode(compressed, uncompressed);
-        if (written != entry.UncompressedLength)
-        {
-            throw new InvalidDataException(
-                $"Segment {header.SegmentId}: LZ4 decode produced {written} bytes, expected {entry.UncompressedLength}.");
-        }
 
         var localOffset = header.Offset - (int)entry.UncompressedStart;
         if (localOffset < 0 || localOffset + header.Length > uncompressed.Length)
@@ -67,6 +79,49 @@ public sealed class SegmentReader(string directory) : IPayloadReader, IDisposabl
         }
 
         return uncompressed.AsMemory(localOffset, header.Length);
+    }
+
+    private async ValueTask<byte[]> GetOrDecodeBlockAsync(
+        CachedSegment cached, int segmentId, BlockTableEntry entry, CancellationToken cancellationToken)
+    {
+        var key = (segmentId, entry.UncompressedStart);
+        if (_blockCache.TryGetValue(key, out var cachedBlock)) return cachedBlock;
+
+        var rented = ArrayPool<byte>.Shared.Rent(entry.CompressedLength);
+        byte[] uncompressed;
+        try
+        {
+            var compressed = rented.AsMemory(0, entry.CompressedLength);
+            await RandomAccess.ReadAsync(cached.Handle, compressed, entry.CompressedStart, cancellationToken)
+                .ConfigureAwait(false);
+
+            uncompressed = new byte[entry.UncompressedLength];
+            var written = LZ4Codec.Decode(compressed.Span, uncompressed);
+            if (written != entry.UncompressedLength)
+            {
+                throw new InvalidDataException(
+                    $"Segment {segmentId}: LZ4 decode produced {written} bytes, expected {entry.UncompressedLength}.");
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+
+        // GetOrAdd's factory can run more than once under contention (same tolerance as
+        // GetOrOpen below) — harmless here since the losing decode is just discarded.
+        var stored = _blockCache.GetOrAdd(key, uncompressed);
+        _blockCacheOrder.Enqueue(key);
+        EvictIfOverCapacity();
+        return stored;
+    }
+
+    private void EvictIfOverCapacity()
+    {
+        while (_blockCache.Count > BlockCacheCapacity && _blockCacheOrder.TryDequeue(out var oldest))
+        {
+            _blockCache.TryRemove(oldest, out _);
+        }
     }
 
     private CachedSegment? GetOrOpen(int segmentId)

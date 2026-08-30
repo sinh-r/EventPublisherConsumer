@@ -564,6 +564,56 @@ Tests: 65, up from 63 (2 new theory-covering cases in
 
 ---
 
+### M1 remainder, step 2 — cut allocation further: segment-read block cache (this pass)
+
+The M1c benchmark found `SegmentReader.ReadAsync` decompressing and allocating a whole ~1 MB
+block on every call regardless of the requested payload's size (~1.7–2 GB across 1,000
+random reads). Needed for M2's deep-scan target (§6: "≥ 500 MB/s decompressed") regardless
+of step 1's outcome, so done now rather than deferred again.
+
+**`SegmentReader` gained a decompressed-block cache**, keyed by
+`(segmentId, block's uncompressed start)`. Safe indefinitely, including against a still-live
+(unsealed) segment: `SegmentWriter` only ever appends new blocks, never rewrites one, so a
+block's bytes are immutable the moment they're written. Bounded by a configurable
+`BlockCacheCapacity` (default 64 blocks, ≈64 MB) with approximate (FIFO, not strict LRU)
+eviction — exact recency tracking isn't worth the synchronization cost for a read cache. The
+compressed-bytes scratch buffer is now rented from `ArrayPool<byte>.Shared` instead of
+`new byte[]`, since it's genuinely transient (only the decompressed block is kept).
+
+**Re-measured with `SegmentReadBenchmarks`, same benchmark, same machine:** allocation
+across 1,000 random reads dropped from ~1.7–2 GB to **~31.62 KB** (essentially just the
+benchmark harness's own overhead), and mean latency for the full 1,000-read run dropped from
+~360–470 ms to **~60–64 µs**. Recorded honestly in
+`tests/EventScope.Bench/baselines/README.md` with why the number is this dramatic: the
+benchmark's 10,000 payloads pack into far fewer distinct blocks than the 64-block cache
+holds, so after warm-up nearly every read is a hit. A day-file deep scan touching more
+distinct blocks than the cache holds still decodes every block at least once — just once per
+block instead of once per read, which is the actual saving — and `SegmentReadBenchmarks`
+doesn't yet cover that broader-than-cache shape; worth adding once M2's deep scan exists.
+
+**`IngestPipeline.BuildPreview` also cleaned up** — it previously decoded the entire body via
+`Encoding.UTF8.GetString` and ran two separate `Replace` passes over the result (three
+string allocations) to produce a 120-char, newline-stripped preview. Now decodes only a
+bounded byte prefix and replaces both characters in a single pass. Minor: normal message
+bodies are only 64–512 bytes, so this was never a growth driver — refuted causes stay
+refuted rather than being retroactively credited — but it's a real, described inefficiency
+with a low-risk fix, and previously had no test coverage at all for its actual output shape
+(existing pipeline tests use synthetic hardcoded preview strings). Added
+`IngestPipelinePreviewTests` to cover both newline replacement and truncation through the
+real pipeline end to end.
+
+**Considered and explicitly not done:** giving `InMemoryPayloadStore`'s 4,096-slot hot ring a
+byte cap in addition to its existing count cap. Worked out from the numbers instead of
+guessed: at the default 1% large-message fraction, the ring's worst-case footprint is
+~5–10 MB — already small and bounded. Adding a byte cap would be solving a problem the
+measurements say doesn't exist.
+
+Tests: 69, up from 65 (3 new in `SegmentReaderBlockCacheTests` covering cache hit/reuse
+correctness, bounded capacity, and the live-segment case; 1 new in
+`IngestPipelinePreviewTests`).
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~60–75 MB — optional further work.** Down from ~470–500 MB (see

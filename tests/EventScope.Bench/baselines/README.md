@@ -44,26 +44,29 @@ dotnet run -c Release --project tests/EventScope.Bench -- -j Short -f '*' -a tes
 
 ### `SegmentReadBenchmarks.ReadOneThousandRandomPayloads`
 
-| PayloadSize | Mean | Allocated |
-|---|---|---|
-| 256 B | 359.2 ms | 1.73 GB |
-| 4096 B | 465.7 ms | 1.95 GB |
+Re-measured 2026-08-31 after `SegmentReader` grew a decompressed-block cache (see
+`Docs/PROGRESS.md`'s M1-remainder step 2). Original (M1c, no cache) alongside the current
+numbers, same benchmark, same machine:
 
-Per-read latency (≈360–470 µs for 1,000 reads) is comfortably inside the "row selection
-renders body < 100 ms" acceptance criterion.
+| PayloadSize | Mean (M1c) | Mean (now) | Allocated (M1c) | Allocated (now) |
+|---|---|---|---|---|
+| 256 B | 359.2 ms | 60.63 µs | 1.73 GB | 31.62 KB |
+| 4096 B | 465.7 ms | 63.98 µs | 1.95 GB | 31.62 KB |
 
-**The allocation figure is the real finding here, not a benchmark artifact.** ~1.7–2 GB
-across 1,000 reads of a 256–4096 byte payload means each read allocates roughly
-1.7–2 MB on average — far more than the payload itself. `SegmentReader.ReadAsync`
-(`src/EventScope.Storage/Segments/SegmentReader.cs`) allocates a fresh `compressed` buffer
-and a fresh `uncompressed` buffer sized to the **entire containing block** (up to the
-1 MB block size from `SegmentFormat`) on every call, decompresses the whole block, then
-slices out just the requested `header.Length` bytes — there is no decompressed-block cache.
-Against 10,000 payloads packed into relatively few 1 MB blocks, 1,000 *random*-offset reads
-mostly miss whatever the previous read touched, so most reads pay a full block
-decompression. This does not violate any M1 acceptance criterion (latency is still well
-under budget) and is not fixed as part of M1c — it's Storage-internals tuning, out of this
-pass's scope — but it is worth a line in a future M2 pass, since the deep-scan acceptance
-criterion (§6: "≥ 500 MB/s decompressed") and any UI feature that reads many rows in quick
-succession (bulk export, multi-select copy) will feel this allocation rate before they feel
-the latency.
+Per-read latency was already comfortably inside the "row selection renders body < 100 ms"
+acceptance criterion before this change; it still is, now by roughly four more orders of
+magnitude.
+
+**Why the improvement is this large, honestly stated:** the benchmark's own setup packs
+10,000 payloads into a small number of ~1 MB blocks (a few blocks for 256 B payloads, a few
+dozen for 4096 B), all of which fit inside the cache's default 64-block capacity. Once
+warmed up, essentially every one of the 1,000 random reads is a cache hit — an array lookup,
+not a decompression — which is why allocation collapsed to ~31 KB total (BenchmarkDotNet's
+own harness overhead, not `SegmentReader`) instead of merely shrinking. This is a fair
+reflection of the real access pattern the M1 acceptance criterion cares about (a user
+scrolling and selecting rows keeps re-touching a bounded working set of recent segments),
+but it is **not** evidence that a full day-file deep scan touching more distinct blocks than
+the cache holds pays nothing — that case still decodes every block at least once, just once
+per block instead of once per read. `SegmentReadBenchmarks` doesn't yet cover that shape;
+worth adding when M2's deep scan lands, since that's the criterion (§6: "≥ 500 MB/s
+decompressed") this cache was added in anticipation of.

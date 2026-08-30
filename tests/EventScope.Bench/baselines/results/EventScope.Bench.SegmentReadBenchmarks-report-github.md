@@ -10,7 +10,7 @@ Job=ShortRun  IterationCount=3  LaunchCount=1
 WarmupCount=3  
 
 ```
-| Method                        | PayloadSize | Mean     | Error     | StdDev   | Gen0        | Gen1        | Gen2        | Allocated |
-|------------------------------ |------------ |---------:|----------:|---------:|------------:|------------:|------------:|----------:|
-| **ReadOneThousandRandomPayloads** | **256**         | **359.2 ms** |  **49.73 ms** |  **2.73 ms** | **372000.0000** | **372000.0000** | **372000.0000** |   **1.73 GB** |
-| **ReadOneThousandRandomPayloads** | **4096**        | **465.7 ms** | **590.05 ms** | **32.34 ms** | **489000.0000** | **488000.0000** | **488000.0000** |   **1.95 GB** |
+| Method                        | PayloadSize | Mean     | Error     | StdDev   | Gen0   | Allocated |
+|------------------------------ |------------ |---------:|----------:|---------:|-------:|----------:|
+| **ReadOneThousandRandomPayloads** | **256**         | **60.63 μs** | **10.709 μs** | **0.587 μs** | **3.4180** |  **31.62 KB** |
+| **ReadOneThousandRandomPayloads** | **4096**        | **63.98 μs** |  **5.010 μs** | **0.275 μs** | **3.4180** |  **31.62 KB** |

@@ -172,11 +172,28 @@ public sealed class IngestPipeline : IAsyncDisposable
         _coalescer.Enqueue(header, preview, subject, correlationId);
     }
 
+    /// <summary>Decodes only enough of the body to cover <paramref name="maxChars"/> (a
+    /// generous 4-bytes/char bound, not an exact one — cutting a multi-byte sequence at the
+    /// boundary is already tolerated by the pre-existing char-level truncation below) and
+    /// replaces newlines in a single pass, instead of decoding the whole body and running two
+    /// separate <see cref="string.Replace(char, char)"/> passes over it.</summary>
     private static string BuildPreview(byte[] body)
     {
         const int maxChars = 120;
-        var text = Encoding.UTF8.GetString(body).Replace('\n', ' ').Replace('\r', ' ');
-        return text.Length > maxChars ? string.Concat(text.AsSpan(0, maxChars), "…") : text;
+        var byteCount = Math.Min(body.Length, maxChars * 4);
+        var decoded = Encoding.UTF8.GetString(body, 0, byteCount);
+
+        var truncated = decoded.Length > maxChars;
+        var length = truncated ? maxChars : decoded.Length;
+
+        Span<char> buffer = length <= 128 ? stackalloc char[length] : new char[length];
+        for (var i = 0; i < length; i++)
+        {
+            var c = decoded[i];
+            buffer[i] = c is '\n' or '\r' ? ' ' : c;
+        }
+
+        return truncated ? string.Concat(buffer, "…") : new string(buffer);
     }
 
     /// <summary>First 2 KB of the body, captured at ingest for M2's FTS indexer — capturing
