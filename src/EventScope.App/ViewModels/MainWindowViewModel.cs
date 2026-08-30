@@ -26,6 +26,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public MessageRowsView Rows { get; } = new();
 
+    /// <summary>Diagnostic accessors for the measurement session (see
+    /// <c>MainWindow.Measurement.cs</c>) to correlate heap growth against in-flight
+    /// buffering rather than guessing at it.</summary>
+    public long CurrentByteBudgetUsed => _pipeline?.ByteBudgetUsed ?? 0;
+    public long CurrentByteBudgetLimit => _pipeline?.ByteBudgetLimit ?? 0;
+    public int CurrentBatchWriterPending => _sessionStore?.Writer.PendingCount ?? 0;
+
     public ConnectionToolbarViewModel Toolbar { get; } = new();
 
     public StatusBarViewModel StatusBar { get; } = new();

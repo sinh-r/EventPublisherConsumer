@@ -1,61 +1,87 @@
-# M1 acceptance criteria — measured (M1c)
+# M1 acceptance criteria — measured (M1c, then re-measured after the M1-remainder pass)
 
 Build plan §6 lists five acceptance criteria for M1. All five are measured here against real
 code, not assumed — see `tests/EventScope.App.Tests/AcceptanceCriteriaTests.cs`,
 `tests/EventScope.Acceptance.Tests/StorageAcceptanceCriteriaTests.cs`, and
-`build/Measure-M1Acceptance.ps1`. Machine: see `../README.md` (same laptop, same session,
-2026-08-30).
+`build/Measure-M1Acceptance.ps1`. Machine: see `../README.md` (same laptop). M1c's original
+measurement was 2026-08-30; the heap-growth/shutdown investigation below is 2026-08-31.
 
 | Criterion | Result | Source |
 |---|---|---|
-| 10,000 msg/s for 60s, no frame over 100 ms | **Marginal — 1 of 2,697 samples over budget** (p50 18.3 ms, p99 37.3 ms, max 119.6 ms) | `gui-frame-time.csv` |
-| Heap growth under 50 MB across that run | **Fails — ~470–500 MB growth measured**, not 50 MB | `gui-heap-growth.csv`, see below |
+| 10,000 msg/s for 60s, no frame over 100 ms | **Marginal, unchanged — 1 of 2,635 samples over budget** (p50 20.8 ms, p99 38.7 ms, max 104.7 ms) | `gui-frame-time.csv` |
+| Heap growth under 50 MB across that run | **Marginal, was a hard fail — ~62–76 MB growth now, down from ~470–500 MB** | `gui-heap-growth.csv`, see below |
 | 50,000-row scroll under 16 ms/frame | **Pass** (p50 3.5–3.6 ms, p99 4.7–8.1 ms, max 4.7–10.2 ms across repeated runs) | `scroll-frame-time.csv` |
 | Row selection renders body under 100 ms | **Pass, comfortably** (p50 0.5–1.8 ms, max 7.6–41.3 ms depending on run) | `cold-segment-read-latency.csv` |
 | Zero messages lost from disk under saturation | **Pass** — 20,000/20,000 messages landed on disk against a deliberately starved 16 KB byte budget | `saturation-zero-loss.csv` |
 
-Three of five pass cleanly. Two do not, and are recorded honestly rather than smoothed over:
+Three of five pass cleanly. Two are marginal — much improved from M1c's recording, but not a
+clean pass — and that is recorded honestly rather than rounded up to a pass.
 
-## Heap growth: ~470–500 MB, not under 50 MB
+## Heap growth: root-caused and mostly fixed — ~470–500 MB down to ~62–76 MB
 
-`gui-heap-growth.csv` is the raw `dotnet-counters` output from a 60s run of the real
-`EventScope.exe` (`build/Measure-M1Acceptance.ps1`, `FakeEventSource` at the default 10k
-msg/s). Three independent counters agree, ruling out a single-metric measurement fluke:
+M1c recorded the growth but explicitly did not root-cause it. Two theories were tested by
+direct measurement before any code changed, specifically to avoid fixing a plausible-sounding
+but wrong cause:
 
-- Managed heap total (sum of gen0+gen1+gen2+poh+loh at each collection): **51 MB → 521 MB**
-- Process working set: **277 MB → 771 MB**
-- GC committed size: **63 MB → 564 MB**
+**Theory 1 — `SqliteBatchWriter`'s `BlockingCollection<WriteOp>` queue is unbounded
+(`SqliteBatchWriter.cs`), and a growing backlog of queued `InsertMessage` ops (each holding a
+2 KB `BodyHead` string) explains both the heap growth and the slow shutdown (draining a large
+backlog at 500 rows/commit).** Refuted. A standalone harness driving the real
+`SegmentWriter` + `SqliteBatchWriter` at genuine 10k msg/s for 20s (bypassing Avalonia
+entirely) showed the queue at 0 for all but one sampled instant (briefly 500, one batch) and
+managed heap staying under 20 MB throughout. Confirmed again inside the real app: a
+`gui-byte-budget.csv` sampler added to the measurement session
+(`MainWindow.Measurement.cs`) shows `batch_writer_pending` never sustaining above 500 across
+a full 60s run. The batch writer drains far faster than 10k msg/s (the existing
+`SqliteBatchInsertBenchmarks` baseline already showed ~138k rows/sec) — there was no backlog
+to bound.
 
-**Not yet diagnosed as leak vs. GC lag vs. by-design buffering**, and that distinction
-matters a lot for what (if anything) needs fixing — this is a measurement, not a root-cause
-analysis, and root-causing it is out of this pass's scope (M1c is Kafka + measurement, not a
-memory-tuning pass). Candidates worth checking first in a follow-up:
+**Theory 2 — the ingest channel's 256 MB byte budget is running near-full (the M1c report's
+own leading candidate).** Also refuted by the same `gui-byte-budget.csv` sampler:
+`byte_budget_used` peaks in the low hundreds of KB against the 256 MB limit across the whole
+run — never remotely close to saturated.
 
-- The ingest channel's byte budget defaults to 256 MB (`IngestPipeline`'s
-  `byteBudgetLimit` parameter) — that alone is close to half the observed growth if the
-  budget is running near-full during a 10k msg/s burst, which would be expected buffering,
-  not a leak.
-- Gen2 collections are infrequent by design; 60 seconds may simply not be long enough for
-  the GC to reclaim garbage that a longer run would show getting collected. A longer
-  (5–10 minute) run with the same counters would distinguish "hasn't collected yet" from
-  "won't collect."
-- `MessageRowsView`'s ring buffers are fixed-capacity (65,536 rows by default) and shouldn't
-  grow unboundedly — worth confirming they aren't, rather than assuming.
+**The actual cause, found by reading `FakeEventSource.BuildJsonBody`:** for every "large"
+message (1% of traffic by default, ~100/sec at 10k msg/s), the old implementation built two
+intermediate C# strings — a padding string and the final interpolated JSON string — each
+64–98 KB, i.e. 128–196 KB in UTF16, well past the 85,000-byte Large Object Heap threshold.
+That is on the order of 25–30 MB/sec of purely avoidable LOH churn, generated by the
+synthetic-load fixture itself rather than anything under test. Rewritten to write UTF8 bytes
+directly into one final buffer with no intermediate large strings
+(`FakeEventSource.BuildJsonBody`); verified byte-for-byte JSON-shape-equivalent by a new test
+(`FakeEventSourceTests.Body_is_valid_json_with_correct_fields_and_padding_length`, both the
+small and large path).
 
-## Frame time: 1 sample over 100 ms out of 2,697
+Result, three independent counters, before → after (60s runs, same machine):
 
-Not a clean pass, but close: p50 and p99 are both well inside budget (18.3 ms / 37.3 ms), and
-only one 60ms-scale sample crossed 100 ms across the full minute — consistent with a single
-GC pause rather than a sustained problem. Worth re-measuring alongside whatever the heap
-investigation above finds, since the two are plausibly related (a large gen2 collection is
-exactly the kind of event that would produce one slow frame).
+| Counter | M1c (before) | This pass (after) |
+|---|---|---|
+| Managed heap total | 51 MB → 521 MB (Δ ~470 MB) | 52 MB → 114 MB (Δ ~62 MB) |
+| Process working set | 277 MB → 771 MB (Δ ~494 MB) | 264 MB → 340 MB (Δ ~76 MB) |
+| GC committed size | 63 MB → 564 MB (Δ ~501 MB) | 69 MB → 137 MB (Δ ~68 MB) |
 
-## Also observed, not yet explained: slow shutdown
+A ~85–90% reduction, reproduced across two separate 60s runs (Δ 55 MB and Δ 62 MB managed
+heap). **Still not a clean pass against the 50 MB budget** — the remaining ~60–75 MB is not
+further root-caused in this pass. The build plan's own standing candidate remains the leading
+explanation for what's left: 60 seconds may not be enough time for gen2 to reclaim everything
+a longer run would show getting collected. Not chased further here because the return here
+was already large and M2/M3 are the larger remaining scope; worth a longer (5–10 minute) run
+with the same counters if this needs to be a clean pass rather than a large improvement.
 
-After the 60s measurement window closed and streaming stopped, `EventScope.exe` did not exit
-on its own within 30 seconds (`build/Measure-M1Acceptance.ps1` had to force-stop it). Not
-one of the five build-plan criteria, but worth flagging: a user who presses Stop or closes
-the window after a sustained high-throughput run may see the same delay.
-`IngestPipeline.DisposeAsync` cancels the ingest channel and awaits the drain task — whether
-that's legitimately draining a large in-flight backlog, or something is stuck, isn't known
-without a dedicated investigation.
+## Slow shutdown: no longer reproduces, most likely the same cause
+
+M1c reported `EventScope.exe` not exiting within 30 seconds of a sustained run. Across every
+measurement run in this pass (four 60-second-class runs, all with the heap-growth fix in
+place), the process exited cleanly on its own every time — the `Measure-M1Acceptance.ps1`
+"did not exit on its own" warning never fired. Not independently proven, but the timing lines
+up: `IngestPipeline.DisposeAsync`'s drain and `SqliteBatchWriter.Dispose`'s `Thread.Join()`
+both wait on real work completing, and severe GC pressure from the LOH churn above is a
+plausible reason both were slow before. Left as "no longer reproduces" rather than "fixed and
+proven," since no dedicated shutdown-timing test was written to close it formally.
+
+## Frame time: 1 sample over 100 ms out of 2,635 — unchanged
+
+Same shape as M1c: p50 and p99 both comfortably inside budget, one single sample over. Given
+the heap-growth fix removed a large source of GC pressure and this number did not move,
+the earlier hypothesis that the one slow frame was caused by a large gen2 collection is now
+less likely — it appears to be an unrelated, rare one-off.

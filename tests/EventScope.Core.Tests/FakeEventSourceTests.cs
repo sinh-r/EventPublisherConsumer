@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading.Channels;
 using EventScope.Core.Ingest;
 using EventScope.Core.Models;
@@ -89,5 +90,50 @@ public class FakeEventSourceTests
         var commonLength = Math.Min(a.Count, b.Count);
         Assert.True(commonLength > 10, $"expected a meaningful run in 150ms, got {a.Count} and {b.Count}");
         Assert.Equal(a.Take(commonLength), b.Take(commonLength));
+    }
+
+    /// <summary>
+    /// The body is now built by writing UTF8 bytes directly (see PROGRESS.md's heap-growth
+    /// investigation — the previous implementation composed two intermediate strings large
+    /// enough to land on the LOH for every large message). This asserts the byte-level
+    /// rewrite produces exactly the same JSON shape the old string-interpolation version did:
+    /// valid JSON, correct field values, and a padding field of the right length — for both a
+    /// small and a large message, since the large path is where the rewrite is least trivial.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Body_is_valid_json_with_correct_fields_and_padding_length(bool large)
+    {
+        var largeFraction = large ? 1.0 : 0.0;
+        var source = new FakeEventSource(messagesPerSecond: 1000, largeFraction: largeFraction, deadLetterFraction: 0, seed: 3);
+        var channel = Channel.CreateUnbounded<RawMessage>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        await source.RunAsync(channel.Writer, cts.Token);
+        channel.Writer.TryComplete();
+
+        Assert.True(channel.Reader.TryRead(out var message), "expected at least one message");
+
+        using var doc = JsonDocument.Parse(message.Body);
+        var root = doc.RootElement;
+
+        Assert.Equal(message.CorrelationId, root.GetProperty("correlationId").GetString());
+        Assert.True(root.GetProperty("sequence").GetInt64() >= 0);
+        Assert.InRange(root.GetProperty("amount").GetInt64(), 0, 999);
+
+        var padding = root.GetProperty("padding").GetString();
+        Assert.NotNull(padding);
+        Assert.True(padding.Length == 0 || padding.All(c => c == 'x'));
+
+        if (large)
+        {
+            Assert.True(message.Body.Length > 64 * 1024);
+            Assert.True(padding!.Length > 64 * 1024 - 200);
+        }
+
+        // The fixed JSON scaffold around the padding field is small and constant, so the
+        // padding accounts for nearly the entire body regardless of message size.
+        Assert.True(padding!.Length >= Math.Max(0, message.Body.Length - 100));
     }
 }

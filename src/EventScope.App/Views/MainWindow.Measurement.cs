@@ -57,15 +57,33 @@ public partial class MainWindow
         };
         probe.Start();
 
+        // Samples the ingest channel's byte budget and the SQLite batch writer's pending
+        // queue alongside frame time, so a heap-growth investigation can correlate growth
+        // against in-flight buffering (expected, bounded by ByteBudgetLimit) versus
+        // something unbounded. See PROGRESS.md's heap-growth investigation.
+        var byteBudgetSamples = new List<(double ElapsedSeconds, long Used, long Limit, int QueuePending)>();
+        var budgetProbe = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+        budgetProbe.Tick += (_, _) =>
+        {
+            byteBudgetSamples.Add((
+                stopwatch.Elapsed.TotalSeconds,
+                ViewModel.CurrentByteBudgetUsed,
+                ViewModel.CurrentByteBudgetLimit,
+                ViewModel.CurrentBatchWriterPending));
+        };
+        budgetProbe.Start();
+
         var stopTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
         stopTimer.Tick += (_, _) =>
         {
             stopTimer.Stop();
             probe.Stop();
+            budgetProbe.Stop();
             try
             {
                 ViewModel.ToggleRunCommand.Execute(null); // stops streaming; DisposeAsync runs on Closing
                 WriteFrameTimesCsv(outputPath, seconds, frameTimesMs);
+                WriteByteBudgetCsv(outputPath, byteBudgetSamples);
             }
             finally
             {
@@ -75,6 +93,20 @@ public partial class MainWindow
             }
         };
         stopTimer.Start();
+    }
+
+    private static void WriteByteBudgetCsv(
+        string frameOutputPath,
+        List<(double ElapsedSeconds, long Used, long Limit, int QueuePending)> samples)
+    {
+        var outputPath = Path.Combine(
+            Path.GetDirectoryName(frameOutputPath) ?? Path.GetTempPath(),
+            "gui-byte-budget.csv");
+
+        var lines = new List<string> { "elapsed_seconds,byte_budget_used,byte_budget_limit,batch_writer_pending" };
+        lines.AddRange(samples.Select(s =>
+            $"{s.ElapsedSeconds:F2},{s.Used},{s.Limit},{s.QueuePending}"));
+        File.WriteAllLines(outputPath, lines);
     }
 
     private static void WriteFrameTimesCsv(string outputPath, int durationSeconds, List<double> frameTimesMs)

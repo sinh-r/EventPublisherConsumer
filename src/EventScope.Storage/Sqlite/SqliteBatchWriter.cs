@@ -22,6 +22,12 @@ public sealed class SqliteBatchWriter : IDisposable
     private readonly BlockingCollection<WriteOp> _queue = new(new ConcurrentQueue<WriteOp>());
     private readonly Thread _thread;
 
+    /// <summary>Diagnostic only — number of ops enqueued but not yet committed. Used to
+    /// confirm/refute the backlog theory behind PROGRESS.md's unexplained heap growth before
+    /// any fix is made; kept afterward since it is generally useful for surfacing writer
+    /// health (e.g. a future status-bar "write lag" indicator).</summary>
+    public int PendingCount => _queue.Count;
+
     public SqliteBatchWriter(string databasePath, TimeProvider? timeProvider = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
