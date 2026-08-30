@@ -625,6 +625,15 @@ Half a day, before any UI is built. It determines whether M1's grid is `DataGrid
 answer. **This is the single highest-ROI step in the project.**
 
 ### M1 — Kafka consumer, end to end
+
+**Reordered into M1a / M1b (see `Docs/PROGRESS.md`), because the storage stack (steps 3–4
+below) can't tell you whether the shell actually renders, and Stage 1's grid work sat
+unproven against a real window until the milestone's very end otherwise.** M1a is steps 1,
+2, 5, 6 plus the non-disk half of 3, with an `IPayloadReader` seam and an in-memory stand-in
+where the segment reader (step 7) will go. M1b is the rest: steps 3's disk half, 4, and the
+real step-7 reader — dropped in behind the same interface with no shell change. Step
+numbering below is unchanged so the two documents still line up.
+
 1. `SourceCapabilities`, `IEventSource`, `RawMessage`, `MessageHeader`, `OutgoingMessage`.
 2. `FakeEventSource` **before** the Kafka one — every performance criterion is measured
    against it, so it is infrastructure, not a test double.

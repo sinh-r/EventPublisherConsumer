@@ -14,10 +14,13 @@
   <Target Name="SignLocalTestBinary"
           AfterTargets="Build"
           Condition="'$(IsTestProject)' == 'true' AND '$(OS)' == 'Windows_NT' AND '$(Configuration)' == 'Debug'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Sign-LocalTestBinary.ps1&quot; -Path &quot;$(TargetPath)&quot;"
-          ContinueOnError="WarnAndContinue" />
-    <Exec Condition="Exists('$(TargetDir)$(TargetName).exe') AND '$(TargetPath)' != '$(TargetDir)$(TargetName).exe'"
-          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Sign-LocalTestBinary.ps1&quot; -Path &quot;$(TargetDir)$(TargetName).exe&quot;"
+    <!--
+      Signs every DLL/EXE in the output directory, not just this project's own assembly —
+      copied dependencies (Avalonia.*.dll, SQLitePCLRaw.provider.e_sqlite3.dll, and similar)
+      have all been observed independently blocked by Smart App Control. See
+      build/Sign-LocalTestBinary.ps1 and PROGRESS.md's M1b entry for what motivated this.
+    -->
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Sign-LocalTestBinary.ps1&quot; -Directory &quot;$(TargetDir.TrimEnd('\'))&quot;"
           ContinueOnError="WarnAndContinue" />
   </Target>
 

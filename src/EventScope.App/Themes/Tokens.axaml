@@ -1,0 +1,80 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    Ported from EventScope.dc.html (see Docs/eventscope-build-plan.md §4.1) — the mockup's
+    inline <style> tokens are authoritative, not Nocturne's bundled styles.css. Alpha-blended
+    entries (Line, Line2, AccentTint, AmberTint, RedTint, Hover, Sel) are computed from the
+    documented percentage onto the documented base colour and encoded as 8-digit #AARRGGBB.
+    Dark is the default theme; ThemeDictionaries below key it "Dark" / "Light" to match
+    Application.RequestedThemeVariant.
+  -->
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="Bg" Color="#161826" />
+      <SolidColorBrush x:Key="Surf" Color="#1c1e2c" />
+      <SolidColorBrush x:Key="Surf2" Color="#232532" />
+      <SolidColorBrush x:Key="Raise" Color="#2a2c3b" />
+      <SolidColorBrush x:Key="Text" Color="#e9e9ed" />
+      <SolidColorBrush x:Key="Muted" Color="#9397ab" />
+      <SolidColorBrush x:Key="Dim" Color="#75798c" />
+      <SolidColorBrush x:Key="Line" Color="#21E9E9ED" />
+      <SolidColorBrush x:Key="Line2" Color="#12E9E9ED" />
+      <SolidColorBrush x:Key="Accent" Color="#9184d9" />
+      <SolidColorBrush x:Key="AccentDim" Color="#5d5294" />
+      <SolidColorBrush x:Key="AccentTint" Color="#249184D9" />
+      <SolidColorBrush x:Key="Green" Color="#57b98d" />
+      <SolidColorBrush x:Key="Amber" Color="#d7a44f" />
+      <SolidColorBrush x:Key="AmberTint" Color="#26D7A44F" />
+      <SolidColorBrush x:Key="Red" Color="#d9736f" />
+      <SolidColorBrush x:Key="RedTint" Color="#21D9736F" />
+      <SolidColorBrush x:Key="Hover" Color="#0DE9E9ED" />
+      <SolidColorBrush x:Key="Sel" Color="#299184D9" />
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="Bg" Color="#eceef7" />
+      <SolidColorBrush x:Key="Surf" Color="#f7f8fd" />
+      <SolidColorBrush x:Key="Surf2" Color="#ffffff" />
+      <SolidColorBrush x:Key="Raise" Color="#ffffff" />
+      <SolidColorBrush x:Key="Text" Color="#232532" />
+      <SolidColorBrush x:Key="Muted" Color="#5f6377" />
+      <SolidColorBrush x:Key="Dim" Color="#82869a" />
+      <SolidColorBrush x:Key="Line" Color="#29232532" />
+      <SolidColorBrush x:Key="Line2" Color="#12232532" />
+      <SolidColorBrush x:Key="Accent" Color="#5d5294" />
+      <SolidColorBrush x:Key="AccentDim" Color="#796cbf" />
+      <SolidColorBrush x:Key="AccentTint" Color="#1C5D5294" />
+      <SolidColorBrush x:Key="Green" Color="#2f7d5c" />
+      <SolidColorBrush x:Key="Amber" Color="#8c6215" />
+      <SolidColorBrush x:Key="AmberTint" Color="#248C6215" />
+      <SolidColorBrush x:Key="Red" Color="#a5423e" />
+      <SolidColorBrush x:Key="RedTint" Color="#1CA5423E" />
+      <SolidColorBrush x:Key="Hover" Color="#0B232532" />
+      <SolidColorBrush x:Key="Sel" Color="#1F5D5294" />
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- Theme-invariant. -->
+  <SolidColorBrush x:Key="Scrim" Color="#940A0B12" />
+  <!-- Program.cs calls AppBuilder.WithInterFont(), which registers "Inter" as a family name. -->
+  <FontFamily x:Key="SansFontFamily">Inter, Segoe UI</FontFamily>
+  <FontFamily x:Key="MonoFontFamily">JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+
+  <!-- §4.3 geometry — region heights shared between the window layout and its regions. -->
+  <x:Double x:Key="TabStripHeight">36</x:Double>
+  <x:Double x:Key="ToolbarHeight">48</x:Double>
+  <x:Double x:Key="BannerHeight">36</x:Double>
+  <x:Double x:Key="SearchBarHeight">44</x:Double>
+  <x:Double x:Key="GridHeaderHeight">24</x:Double>
+  <x:Double x:Key="GridRowHeight">26</x:Double>
+  <x:Double x:Key="SplitterHeight">4</x:Double>
+  <x:Double x:Key="DetailPaneDefaultHeight">320</x:Double>
+  <x:Double x:Key="DetailPaneMinHeight">120</x:Double>
+  <x:Double x:Key="DetailPaneMaxHeight">620</x:Double>
+  <x:Double x:Key="StatusBarHeight">28</x:Double>
+
+</ResourceDictionary>

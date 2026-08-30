@@ -1,0 +1,256 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:EventScope.App.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="1600" d:DesignHeight="1000"
+        x:Class="EventScope.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="EventScope"
+        Width="1600" Height="1000"
+        MinWidth="1280" MinHeight="800"
+        Background="{DynamicResource Bg}">
+
+    <Window.DataContext>
+        <vm:MainWindowViewModel />
+    </Window.DataContext>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="44" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="4" />
+            <RowDefinition Height="320" MinHeight="120" MaxHeight="620" />
+            <RowDefinition Height="28" />
+        </Grid.RowDefinitions>
+
+        <!-- Tab strip (§4.1 of the UI spec). One always-present tab for the fake source;
+             the connection manager and multi-connection tabs are Stage 5. -->
+        <Border Grid.Row="0" Background="{DynamicResource Bg}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Height="36">
+                <Border Background="{DynamicResource Surf}"
+                        BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,2"
+                        Padding="14,0">
+                    <TextBlock Text="Live (Fake source)" VerticalAlignment="Center"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                               Foreground="{DynamicResource Text}" />
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- Connection toolbar. -->
+        <Border Grid.Row="1" Background="{DynamicResource Surf}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+                <Panel Grid.Column="0" Width="8" Height="8" Margin="0,0,8,0">
+                    <Ellipse Fill="{DynamicResource Green}" IsVisible="{Binding Toolbar.IsRunning}" />
+                    <Ellipse Fill="{DynamicResource Dim}" IsVisible="{Binding !Toolbar.IsRunning}" />
+                </Panel>
+
+                <TextBlock Grid.Column="1" Text="{Binding Toolbar.StatusLabel}"
+                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                           Foreground="{DynamicResource Text}" Margin="0,0,16,0" />
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Content="Start" Command="{Binding ToggleRunCommand}"
+                            IsVisible="{Binding !Toolbar.IsRunning}"
+                            Background="Transparent" BorderBrush="{DynamicResource Accent}"
+                            Foreground="{DynamicResource Accent}" Padding="12,4"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                    <Button Content="Stop" Command="{Binding ToggleRunCommand}"
+                            IsVisible="{Binding Toolbar.IsRunning}"
+                            Background="Transparent" BorderBrush="{DynamicResource Red}"
+                            Foreground="{DynamicResource Red}" Padding="12,4"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                </StackPanel>
+
+                <!-- Capability-bound indicator, not a broker-type switch: every element here
+                     reads a SourceCapabilities flag. The full segmented-control widget and
+                     its exact styling is Stage 5 polish; this is the M1a stand-in. -->
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="8" Margin="0,0,16,0">
+                    <TextBlock Text="peek" IsVisible="{Binding Toolbar.CanPeekNonDestructively}"
+                               FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource Muted}" />
+                    <TextBlock Text="partitioned" IsVisible="{Binding Toolbar.SupportsPartitions}"
+                               FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource Muted}" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="5" VerticalAlignment="Center"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                           Foreground="{DynamicResource Muted}"
+                           Text="{Binding Toolbar.MessagesPerSecond, StringFormat='{}{0:N0} msg/s'}" />
+            </Grid>
+        </Border>
+
+        <!-- Warning banner. Collapses naturally when the connected source can peek
+             non-destructively (true for FakeEventSource); reachable once SQS lands in M4. -->
+        <Border Grid.Row="2" Height="36" Background="{DynamicResource AmberTint}"
+                BorderBrush="{DynamicResource Amber}" BorderThickness="0,0,0,1" Padding="14,0"
+                IsVisible="{Binding !Toolbar.CanPeekNonDestructively}">
+            <TextBlock Text="This source cannot peek non-destructively — consuming removes messages."
+                       VerticalAlignment="Center" Foreground="{DynamicResource Amber}"
+                       FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+        </Border>
+
+        <!-- Search bar. Present for layout fidelity; tiered search against SQLite is M2. -->
+        <Border Grid.Row="3" Background="{DynamicResource Bg}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
+            <TextBox Watermark="Search — wired in M2" IsEnabled="False" VerticalAlignment="Center"
+                     Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                     Foreground="{DynamicResource Text}"
+                     FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5" />
+        </Border>
+
+        <!-- Message grid. MessageRowsView (Rows) implements IDataGridCollectionView + IList
+             directly so DataGrid never wraps it in its own eagerly-enumerating
+             DataGridCollectionView — see MessageRowsView's class remarks. -->
+        <DataGrid Grid.Row="4" x:Name="MessageGrid"
+                  x:CompileBindings="False"
+                  ItemsSource="{Binding Rows}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserSortColumns="False"
+                  CanUserReorderColumns="False"
+                  CanUserResizeColumns="True"
+                  HeadersVisibility="Column"
+                  GridLinesVisibility="None"
+                  RowHeight="26"
+                  Background="{DynamicResource Bg}"
+                  Foreground="{DynamicResource Text}"
+                  BorderThickness="0"
+                  LoadingRow="OnLoadingRow"
+                  UnloadingRow="OnUnloadingRow"
+                  SelectionChanged="OnGridSelectionChanged">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="TIME" Width="100"
+                                     Binding="{Binding Time, StringFormat='{}{0:HH:mm:ss.fff}'}" />
+                <DataGridTextColumn Header="SUBJECT" Width="180" Binding="{Binding Subject}" />
+                <DataGridTextColumn Header="CORRELATION ID" Width="260" Binding="{Binding CorrelationId}" />
+                <DataGridTextColumn Header="SIZE" Width="70" Binding="{Binding Size}" />
+                <!-- Spec width is 48 (Docs/eventscope-build-plan.md §4.3), but Avalonia's
+                     DataGridColumnHeader chrome clips a 4-char uppercase header below ~64px
+                     regardless of Padding — measured, not guessed. 70 matches SIZE, the
+                     other 4-char header, which renders fully at that width. -->
+                <DataGridTextColumn Header="PART" Width="70" Binding="{Binding Partition}" />
+                <DataGridTextColumn Header="PREVIEW" Width="*" Binding="{Binding Preview}" />
+            </DataGrid.Columns>
+            <DataGrid.Styles>
+                <Style Selector="DataGridColumnHeader">
+                    <Setter Property="Background" Value="{DynamicResource Surf}" />
+                    <Setter Property="Foreground" Value="{DynamicResource Dim}" />
+                    <Setter Property="FontFamily" Value="{DynamicResource SansFontFamily}" />
+                    <Setter Property="FontSize" Value="11" />
+                    <Setter Property="Height" Value="24" />
+                    <Setter Property="Padding" Value="6,0" />
+                    <Setter Property="MinWidth" Value="0" />
+                </Style>
+                <Style Selector="DataGridRow">
+                    <Setter Property="FontFamily" Value="{DynamicResource MonoFontFamily}" />
+                    <Setter Property="FontSize" Value="12.5" />
+                </Style>
+                <Style Selector="DataGridRow.odd">
+                    <Setter Property="Background" Value="{DynamicResource Line2}" />
+                </Style>
+                <Style Selector="DataGridRow:pointerover">
+                    <Setter Property="Background" Value="{DynamicResource Hover}" />
+                </Style>
+                <Style Selector="DataGridRow:selected">
+                    <Setter Property="Background" Value="{DynamicResource Sel}" />
+                </Style>
+                <Style Selector="DataGridRow.evicted">
+                    <Setter Property="Opacity" Value="0.55" />
+                </Style>
+                <Style Selector="DataGridCell">
+                    <Setter Property="Foreground" Value="{DynamicResource Text}" />
+                </Style>
+            </DataGrid.Styles>
+        </DataGrid>
+
+        <GridSplitter Grid.Row="5" Height="4" Background="{DynamicResource Line}"
+                      ResizeDirection="Rows" Cursor="SizeNorthSouth"
+                      HorizontalAlignment="Stretch" />
+
+        <!-- Detail pane. -->
+        <Border Grid.Row="6" Background="{DynamicResource Surf}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
+            <Grid RowDefinitions="34,*">
+                <Border Grid.Row="0" BorderBrush="{DynamicResource Line}"
+                        BorderThickness="0,0,0,1" Padding="14,0">
+                    <TextBlock VerticalAlignment="Center"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                               Foreground="{DynamicResource Text}"
+                               Text="{Binding Detail.Selected.Subject, FallbackValue='No message selected'}" />
+                </Border>
+
+                <Grid Grid.Row="1" ColumnDefinitions="260,*" Margin="14">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                   Foreground="{DynamicResource Muted}"
+                                   Text="{Binding Detail.Selected.Sequence, StringFormat='sequence  {0}'}" />
+                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                   Foreground="{DynamicResource Muted}"
+                                   Text="{Binding Detail.Selected.Time, StringFormat='time      {0:HH:mm:ss.fff}'}" />
+                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                   Foreground="{DynamicResource Muted}"
+                                   Text="{Binding Detail.Selected.CorrelationId, StringFormat='corr-id   {0}'}" />
+                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                   Foreground="{DynamicResource Muted}"
+                                   Text="{Binding Detail.Selected.Size, StringFormat='size      {0} B'}" />
+                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                   Foreground="{DynamicResource Muted}"
+                                   Text="{Binding Detail.Selected.Partition, StringFormat='partition {0}'}" />
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Background="{DynamicResource Surf2}" CornerRadius="5"
+                            Padding="10" Margin="14,0,0,0">
+                        <Panel>
+                            <TextBlock Text="Loading…" IsVisible="{Binding Detail.IsLoading}"
+                                       FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                       Foreground="{DynamicResource Dim}" FontStyle="Italic" />
+                            <TextBlock Text="{Binding Detail.UnavailableReason}"
+                                       IsVisible="{Binding Detail.IsUnavailable}"
+                                       FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                       Foreground="{DynamicResource Dim}" FontStyle="Italic" />
+                            <ScrollViewer IsVisible="{Binding !Detail.IsUnavailable}">
+                                <TextBlock Text="{Binding Detail.BodyText}"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                           LineHeight="19" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource Text}" />
+                            </ScrollViewer>
+                        </Panel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Status bar. -->
+        <Border Grid.Row="7" Background="{DynamicResource Surf}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="14,0">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                           Foreground="{DynamicResource Muted}"
+                           Text="{Binding StatusBar.TotalAppended, StringFormat='{}{0:N0} total'}" />
+                <TextBlock Grid.Column="1" Margin="16,0,0,0"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                           Foreground="{DynamicResource Muted}"
+                           Text="{Binding StatusBar.UiDropped, StringFormat='{}{0:N0} ui-dropped'}" />
+                <Button Grid.Column="3" Command="{Binding TogglePinCommand}"
+                        IsVisible="{Binding StatusBar.IsPinned}"
+                        Background="Transparent" BorderBrush="{DynamicResource Accent}"
+                        Foreground="{DynamicResource Accent}" Padding="10,2"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12">
+                    <TextBlock Text="{Binding StatusBar.PinnedNewCount, StringFormat='resume live ({0} new)'}" />
+                </Button>
+                <TextBlock Grid.Column="4" Margin="16,0,0,0"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                           Foreground="{DynamicResource Muted}"
+                           Text="{Binding StatusBar.ByteBudgetUsed, StringFormat='{}{0:N0} bytes'}" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

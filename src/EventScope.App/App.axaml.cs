@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using EventScope.App.Views;
 #if DEBUG
 using Avalonia.Diagnostics;
 #endif

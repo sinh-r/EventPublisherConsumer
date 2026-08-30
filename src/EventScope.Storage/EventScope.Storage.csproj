@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="K4os.Compression.LZ4" />
     <PackageReference Include="K4os.Compression.LZ4.Streams" />
   </ItemGroup>
 

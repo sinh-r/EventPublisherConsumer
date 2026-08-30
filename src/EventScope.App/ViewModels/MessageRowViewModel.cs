@@ -29,6 +29,12 @@ public partial class MessageRowViewModel : ObservableObject
     public partial short Partition { get; set; }
 
     [ObservableProperty]
+    public partial int SegmentId { get; set; }
+
+    [ObservableProperty]
+    public partial int Offset { get; set; }
+
+    [ObservableProperty]
     public partial string Preview { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -54,6 +60,8 @@ public partial class MessageRowViewModel : ObservableObject
         CorrelationId = correlationId;
         Size = header.Length;
         Partition = header.Partition;
+        SegmentId = header.SegmentId;
+        Offset = header.Offset;
         Preview = preview ?? string.Empty;
         IsLarge = (header.Flags & MessageFlags.IsLarge) != 0;
         IsEvicted = (header.Flags & MessageFlags.PayloadEvicted) != 0;

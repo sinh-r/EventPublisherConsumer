@@ -4,10 +4,13 @@ A cloud-agnostic event publisher and subscriber for Windows. One desktop tool fo
 inspecting and producing messages across **Apache/Confluent Kafka**, **Azure Service Bus**
 and **AWS SQS**, without switching between three vendor consoles.
 
-> **Status: pre-alpha, under active development.** The scaffold, the storage design and the
-> virtualizing message grid exist. The consumer is being built now (milestone M1); the
-> publisher and the Service Bus / SQS sources come after. There is no release yet.
-> See [`Docs/PROGRESS.md`](Docs/PROGRESS.md) for the live status.
+> **Status: pre-alpha, under active development.** The shell runs against a synthetic
+> in-memory source — streaming, follow/pin, row states, a detail pane with JSON preview —
+> but nothing is written to disk yet (milestone M1b: SQLite, segments, the real Kafka
+> source). The publisher and the Service Bus / SQS sources come after. There is no release
+> yet. See [`Docs/PROGRESS.md`](Docs/PROGRESS.md) for the live status.
+>
+> Try it without a broker: `dotnet run --project src/EventScope.App`, then click **Start**.
 
 ## What it is for
 
