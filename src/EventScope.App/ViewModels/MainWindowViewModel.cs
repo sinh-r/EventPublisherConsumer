@@ -3,14 +3,14 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Collections;
 using EventScope.App.Ingest;
-using EventScope.Core.Ingest;
+using EventScope.Brokers.Kafka;
 using EventScope.Storage.Sqlite;
 
 namespace EventScope.App.ViewModels;
 
 /// <summary>
 /// Owns the ingest pipeline's lifetime and the window's four regions' view models. M1a ran
-/// a single always-available <see cref="FakeEventSource"/> connection over an in-memory
+/// a single always-available <see cref="EventScope.Core.Ingest.FakeEventSource"/> connection over an in-memory
 /// payload stand-in; M1b adds a <see cref="SessionStore"/> (segment files + SQLite) that
 /// persists across a Start/Stop toggle — stopping the stream doesn't delete what's already
 /// on disk, so the store is created once, on first Start, and disposed only when the window
@@ -64,9 +64,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         _sessionStore ??= new SessionStore(DefaultSessionRootDirectory());
 
-        var source = new FakeEventSource();
+        // EventSourceFactory reads EVENTSCOPE_KAFKA_BOOTSTRAP/TOPIC to pick a real
+        // KafkaEventSource instead of the default FakeEventSource — see its remarks. Nothing
+        // else here branches on which one came back: that's the capability abstraction
+        // paying for itself, not a broker-type switch.
+        var source = EventSourceFactory.Create();
         Toolbar.CanPeekNonDestructively = source.Capabilities.CanPeekNonDestructively;
         Toolbar.SupportsPartitions = source.Capabilities.SupportsPartitions;
+
+        if (source is KafkaEventSource kafka)
+        {
+            // Fires from the dedicated Kafka consume thread (see KafkaEventSource's remarks),
+            // never the UI thread — must marshal before touching a bound view-model property.
+            kafka.ErrorOccurred += error =>
+                Dispatcher.UIThread.Post(() => Toolbar.StatusLabel = $"Kafka error: {error.Message}");
+        }
 
         _pipeline = new IngestPipeline(
             source,
@@ -78,7 +90,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _pipeline.Start();
 
         Toolbar.IsRunning = true;
-        Toolbar.StatusLabel = "Streaming";
+        Toolbar.StatusLabel = source is KafkaEventSource ? "Streaming (Kafka)" : "Streaming";
         _lastStatsTotal = Rows.TotalAppended;
         _lastStatsTimeUtc = DateTime.UtcNow;
     }

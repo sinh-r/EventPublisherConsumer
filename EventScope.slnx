@@ -8,8 +8,10 @@
     <Project Path="src/EventScope.Storage/EventScope.Storage.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/EventScope.Acceptance.Tests/EventScope.Acceptance.Tests.csproj" />
     <Project Path="tests/EventScope.App.Tests/EventScope.App.Tests.csproj" />
     <Project Path="tests/EventScope.Bench/EventScope.Bench.csproj" />
+    <Project Path="tests/EventScope.Brokers.Kafka.Tests/EventScope.Brokers.Kafka.Tests.csproj" />
     <Project Path="tests/EventScope.Core.Tests/EventScope.Core.Tests.csproj" />
     <Project Path="tests/EventScope.Storage.Tests/EventScope.Storage.Tests.csproj" />
   </Folder>

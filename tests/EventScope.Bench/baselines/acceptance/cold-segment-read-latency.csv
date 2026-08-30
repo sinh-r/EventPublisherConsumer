@@ -1,0 +1,2 @@
+payload_count,sample_count,p50_ms,p99_ms,max_ms
+5000,500,0.465,1.595,7.561

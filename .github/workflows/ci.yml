@@ -1,9 +1,14 @@
 # Build and test on every push and pull request.
 #
 # Docs/eventscope-implementation-plan.md section 7 assumes a CI exists ("fail CI on >20%
-# regression" for the EventScope.Bench baselines) but never specified one. This is it. The
-# benchmark gate is not wired up yet - EventScope.Bench is still a stub - so this currently
-# builds and tests only. Add the baseline comparison when the bench harness lands in M1.
+# regression" for the EventScope.Bench baselines) but never specified one. This is it.
+#
+# No benchmark regression gate is wired up here, and none should be added against
+# tests/EventScope.Bench/baselines/ as committed: those numbers were measured on a single
+# developer laptop (see that directory's README), and a hard gate comparing windows-latest
+# runner hardware against a local baseline is a false-failure generator, not a real
+# regression check. A real gate needs baselines captured from this workflow's own runner -
+# that is separate follow-up work, not something to bolt onto the committed local numbers.
 
 name: ci
 

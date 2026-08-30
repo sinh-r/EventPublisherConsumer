@@ -715,13 +715,18 @@ with `SQLITE_BUSY`; row counts across day files equal emitted − evicted;
 
 ### Acceptance criteria, and how each is measured
 
+The first five (M1's own) are measured as of M1c — see
+`Docs/PROGRESS.md`'s M1c entry and `tests/EventScope.Bench/baselines/acceptance/README.md`
+for the numbers; two of the five currently fail (heap growth, marginally frame time) and are
+recorded there rather than reworded away here.
+
 | Criterion | Measurement |
 |---|---|
-| 10,000 msg/s for 60s, no frame > 100 ms | `FakeEventSource` at 10k/s; frame times from a render-tick histogram written to CSV |
-| Heap growth < 50 MB across that run | `dotnet-counters collect` on `System.Runtime`; assert `gc-heap-size` delta |
-| 50,000-row scroll < 16 ms/frame | scripted scroll driver over `MessageRowsView`, same histogram |
-| Row selection renders body < 100 ms | stopwatch around the async segment read |
-| Zero messages lost from disk under saturation | ingest N, count rows in SQLite, assert equality; UI drop count asserted separately and independently |
+| 10,000 msg/s for 60s, no frame > 100 ms | `FakeEventSource` at 10k/s; frame times from a `DispatcherPriority.Render` probe in the real windowed app, written to CSV by `build/Measure-M1Acceptance.ps1` — a "render-tick histogram" in a headless test can't observe real dispatcher starvation, only CPU-side cost (see `AcceptanceCriteriaTests`' scroll test remarks) |
+| Heap growth < 50 MB across that run | `dotnet-counters collect` on `System.Runtime` via the same script. **Correction:** the plan assumed a single `gc-heap-size` counter to assert against; this SDK's `System.Runtime` meter has no such counter, only one per generation (`dotnet.gc.last_collection.heap.size[gc.heap.generation=…]`) that must be summed |
+| 50,000-row scroll < 16 ms/frame | scripted scroll driver over `MessageRowsView`, headless `DataGrid` — `tests/EventScope.App.Tests/AcceptanceCriteriaTests.cs` |
+| Row selection renders body < 100 ms | stopwatch around the async segment read — `tests/EventScope.Acceptance.Tests/StorageAcceptanceCriteriaTests.cs` |
+| Zero messages lost from disk under saturation | ingest N under a deliberately starved byte budget, count rows in SQLite, assert equality — same file. UI drop count is a separate, independent counter (`IngestCoalescer.UiDropped`, covered by existing `IngestCoalescerTests`), not re-asserted here |
 | FTS first page < 200 ms over 500k | bench, seeded corpus |
 | Trigram infix on correlation ID < 300 ms | bench; a 2-char query test asserts the `LIKE` fallback is taken |
 | Deep scan ≥ 500 MB/s decompressed | bench |

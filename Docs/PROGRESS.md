@@ -349,17 +349,169 @@ signed, so it is a distinct issue from the load-time block the signing script ta
 
 ---
 
+### M1c — Kafka, measured acceptance criteria (this pass)
+
+Closes M1. `KafkaEventSource` exists, is reachable from the running app, benchmark baselines
+are committed, and all five of the build plan's M1 acceptance criteria (§6) are measured
+against real code rather than assumed — two of them fail, and that is recorded honestly
+below rather than smoothed over.
+
+**`EventScope.Brokers.Kafka/`:**
+- **`KafkaEventSource`** — a dedicated `TaskCreationOptions.LongRunning` task per the
+  threading table (`Consume()` is blocking sync); a fresh, per-instance throwaway consumer
+  group id (`{prefix}-{guid}`, never reused), `enable.auto.commit=false`,
+  `auto.offset.reset=latest`. `Capabilities` differs from `FakeEventSource`'s in exactly the
+  two places that matter: `SupportsDeadLetterQueue=false` (Kafka has no native DLQ) and
+  `SupportsReplay=true` (real seek-by-offset) — the first real exercise of the capability
+  abstraction actually differing between two `IEventSource` implementations, not just two
+  synthetic ones. The channel write inside the consume loop blocks synchronously by design,
+  not sync-over-async sloppiness: the loop owns its own dedicated thread, so blocking it is
+  the back-pressure edge itself — `Consume()` stops being called, lag builds on the broker,
+  nothing is dropped, exactly the guarantee build plan §3.2 describes.
+- **`KafkaMessageMapper`** — `MessageId` falls back through header (`message-id` /
+  `messageId` / `ce-id`, case-insensitive) → message key (UTF-8) → `"{partition}:{offset}"`;
+  `CorrelationId` from a header or `null`; a tombstone (null `Value`) maps to an empty body,
+  not a dropped message.
+- **Tests: `EventScope.Brokers.Kafka.Tests`, 16 tests** (15 run, 1 opt-in integration test
+  skips without `EVENTSCOPE_KAFKA_BOOTSTRAP` — Blocked item 5, still no broker on this
+  machine). Unit tests run against `FakeKafkaConsumer`, a hand-rolled
+  `IConsumer<byte[],byte[]>` matching the repo's existing style (`ManualTicker`,
+  `FiniteEventSource`) rather than a mocking package — every member the source must never
+  touch throws `NotSupportedException`, which is half the point of the fake. Covers: the
+  config (throwaway group, auto-commit off, `auto.offset.reset`), every mapping fallback,
+  `IsPartitionEOF` results skipped not emitted, back-pressure (a channel bounded at 1 with no
+  reader proves `Consume` isn't called a third time while blocked), graceful cancellation and
+  exactly-once `Close()`, and non-fatal-vs-fatal `ConsumeException` handling (non-fatal
+  surfaces on `ErrorOccurred` and the loop continues; fatal breaks the loop and faults the
+  task).
+
+**Reachable from the app (`EventScope.App/Ingest/EventSourceFactory.cs`).** Per-plan minimal
+wiring, not the Stage 5 connection manager: `FakeEventSource` unless
+`EVENTSCOPE_KAFKA_BOOTSTRAP` is set, in which case `KafkaEventSource` against that broker and
+`EVENTSCOPE_KAFKA_TOPIC` (comma-separated, defaults to `"eventscope"`).
+`MainWindowViewModel.Start()` calls the factory instead of hardcoding `FakeEventSource` — the
+two `Toolbar.*` capability assignments already there needed no change, which is the
+capability abstraction paying for itself. `KafkaEventSource.ErrorOccurred` marshals onto the
+UI thread and surfaces into `Toolbar.StatusLabel`. Manually verified: the app runs unchanged
+with no env vars set (default path untouched); pointed at a bogus bootstrap host
+(`EVENTSCOPE_KAFKA_BOOTSTRAP=bogus-host:9092`), the process stays alive for the full
+verification window with no unhandled exception — librdkafka reports connection failure via
+the error callback, not by throwing.
+
+**Publish size, measured not assumed.** The plan flagged that `librdkafka.redist`'s native
+libraries would likely grow the single-file publish past the 123 MB recorded at release
+readiness. Measured: **128,551,531 bytes — essentially unchanged.** The App project's
+`ProjectReference` to `EventScope.Brokers.Kafka` (and therefore `Confluent.Kafka` and
+`librdkafka.redist`) already existed before this pass — the 123 MB figure was recorded after
+that reference was added but before `KafkaEventSource.cs` itself existed, so the native
+payload was already being bundled. Adding the actual Kafka code cost nothing further.
+
+**Benchmark baselines committed** (`tests/EventScope.Bench/baselines/`, `-j Short` job, this
+laptop — see that directory's `README.md` for full machine details and why no CI regression
+gate is wired against them). `SqliteBatchInsertBenchmarks`: 50,000 rows in 362 ms
+(~138k rows/sec into the batch writer's queue, well past the 10,000 msg/s target).
+`SegmentReadBenchmarks`: 1,000 random reads average 360–470 µs each — comfortably inside the
+100 ms row-selection budget — **but allocate ~1.7–2 GB across those 1,000 reads.**
+`SegmentReader.ReadAsync` decompresses and allocates the entire containing ~1 MB block on
+every call regardless of the requested payload's size, with no decompressed-block cache;
+against 10,000 payloads packed into relatively few blocks, random-offset reads mostly miss
+whatever the previous read touched. Not an M1 acceptance-criterion violation (latency is
+still well under budget) and not fixed here — Storage-internals tuning is out of this pass's
+scope — but worth a line for M2, since deep scan (§6: "≥ 500 MB/s decompressed") and any
+bulk-read UI feature will feel the allocation rate before they feel the latency.
+
+**M1 acceptance criteria (build plan §6), all five measured — see
+`tests/EventScope.Bench/baselines/acceptance/README.md` for the full writeup:**
+
+| Criterion | Result |
+|---|---|
+| 10,000 msg/s for 60s, no frame over 100 ms | Marginal — 1 of 2,697 samples over budget (p50 18.3 ms, max 119.6 ms) |
+| Heap growth under 50 MB across that run | **Fails — ~470–500 MB growth measured**, confirmed across three independent counters (managed heap, working set, GC committed size) |
+| 50,000-row scroll under 16 ms/frame | Pass (p50 ~3.5 ms, max 4.7–10.2 ms) |
+| Row selection renders body under 100 ms | Pass, comfortably (p50 0.5–1.8 ms, max under 42 ms) |
+| Zero messages lost from disk under saturation | Pass — 20,000/20,000 against a deliberately starved 16 KB byte budget |
+
+Measured via three new/changed pieces:
+- **`tests/EventScope.Acceptance.Tests`** (new project) — cold segment read latency and
+  saturation zero-loss. Deliberately its own project with **no Avalonia dependency at all**,
+  not part of `EventScope.App.Tests` — see the next section for why.
+- **`EventScope.App.Tests/AcceptanceCriteriaTests.cs`** — the 50,000-row scroll timing (needs
+  a real `DataGrid`, so stays in the Avalonia-headless assembly).
+- **`build/Measure-M1Acceptance.ps1`** (new) — launches the real `EventScope.exe` with
+  `EVENTSCOPE_MEASURE=<seconds>` (auto-starts streaming, runs a
+  `DispatcherPriority.Render` frame-time probe, auto-closes — no UI-Automation
+  click-driving needed for this one), attaches `dotnet-counters` in parallel for the
+  heap-growth half. Both write CSVs to `tests/EventScope.Bench/baselines/acceptance/`.
+
+All soak-scale tests are gated behind `EVENTSCOPE_SOAK=1` (`SkipUnless`) so the normal fast
+suite is unaffected — confirmed by four consecutive normal (non-soak) runs of the full
+5-assembly suite, all green, ~1.7 s for `EventScope.App.Tests` specifically.
+
+**Also observed, not yet explained: slow shutdown.** After the 60s measurement run's
+streaming stopped, `EventScope.exe` did not exit on its own within 30 seconds — the
+measurement script had to force-stop it. Not one of the five acceptance criteria, but a user
+pressing Stop or closing the window after a sustained high-throughput run may see the same
+delay. Whether `IngestPipeline.DisposeAsync`'s cancel-then-drain is legitimately draining a
+large backlog or something is actually stuck isn't known without a dedicated look.
+
+**Six corrections to the plan, found by actually running it — same spirit as every prior
+pass's numbered list:**
+1. **A newly-discovered, non-deterministic hang in `EventScope.App.Tests` on this machine,
+   distinct from the Debug-rebuild hang in Blocked item 2 below.** The very first real async
+   file I/O (`RandomAccess`-based, e.g. `SegmentReader.ReadAsync`) issued in this process
+   after Avalonia's headless platform initializes, before anything has pumped the dispatcher,
+   can hang indefinitely with near-zero CPU activity. **Reproduces against a pre-existing,
+   already-shipped test** (`IngestPipelineStorageTests`) when it happens to run in isolation
+   (`-method` filter) or first in execution order — this is not new-code-specific, it was
+   latent before this pass. Tried and **did not fix it**: `ConfigureAwait(false)` at the
+   await call site (rules out a captured-`SynchronizationContext` theory, since
+   `SegmentReader.ReadAsync` already uses it internally); pumping the dispatcher once during
+   `HeadlessFixture.EnsureInitialized()`; showing and pumping a throwaway `Window` during
+   setup; `ThreadPool.SetMinThreads`. **Worked around, not fixed:** the two new storage-only
+   acceptance tests moved to their own project (`EventScope.Acceptance.Tests`) with no
+   Avalonia reference at all, sidestepping the interaction rather than resolving it. The
+   scroll test and the twelve pre-existing `EventScope.App.Tests` tests still carry the
+   latent risk in soak/heavy-load conditions; the normal (non-`EVENTSCOPE_SOAK`) suite is
+   confirmed unaffected across repeated runs. Left open — needs deeper investigation than
+   this pass's scope, tracked as Blocked item 2's second half below.
+2. **`SqliteBatchInsertBenchmarks`/`SegmentReadBenchmarks` had never been run before this
+   pass** despite existing since M1b; running them surfaced the block-decompression
+   allocation finding above, which no correctness test had a reason to catch.
+3. **The saturation acceptance test's first parameter choice (200,000 messages, 64 KB byte
+   budget) was pathologically slow** — 5+ minutes with near-constant park/release churn on
+   the byte budget, for no additional correctness signal over a smaller run. Tuned to 20,000
+   messages / 16 KB (still forces genuine saturation — room for only ~50 messages in flight —
+   without the pathological overhead).
+4. **The scroll acceptance test needed an untimed warm-up phase**, the same reasoning
+   BenchmarkDotNet's `WarmupCount` exists for: the first few scroll steps pay one-time JIT
+   and first-layout costs. Measured directly: without warm-up, max was 47 ms on the first
+   steps while p50 across the run was 4.8 ms.
+5. **The scroll acceptance test also needed `UnloadingRow` wired to `NotifyRowUnloaded`**,
+   exactly like `MainWindow.axaml.cs` does — `DataGridVirtualizationSpikeTests`' copy-pasted
+   `BuildGrid` helper never needed this because its tests each scroll exactly once. A test
+   that scrolls 70 times without it measures unbounded `_realized`-dictionary and
+   DataGrid-container growth, not `MessageRowsView`'s real steady-state cost: per-scroll cost
+   climbed from ~5 ms to ~180 ms across 70 steps before the fix, ~3.5–4.7 ms consistently
+   after.
+6. **`Dispatcher.UIThread.Invoke` is required, not optional, for a test that constructs
+   Avalonia UI objects.** xunit.v3's in-process runner does not guarantee a test method body
+   executes on the same OS thread its class's constructor ran on. Confirmed by measurement:
+   run alongside other test classes, constructing a `DataGrid` directly in the test method
+   threw `InvalidOperationException: Call from invalid thread`, even though the identical
+   construction pattern in the pre-existing `DataGridVirtualizationSpikeTests` passes —
+   presumably because that class's tests happen to land on the same thread as their own
+   constructor call, not because the construction itself is inherently safe.
+
+---
+
 ## Pending — in build-plan order
 
-- **M1c — `KafkaEventSource`, then tag `v0.1.0`.** M1b is done (see above). Throwaway
-  consumer group, `enable.auto.commit=false`, `auto.offset.reset=latest`, a dedicated
-  `LongRunning` task per the threading table (`Consume()` is blocking sync). Unit-tested
-  against a mocked `IConsumer<byte[],byte[]>` surface; integration tests stay opt-in behind
-  `EVENTSCOPE_KAFKA_BOOTSTRAP` (Blocked item 5 — no broker on this machine). Also still
-  pending from M1b: a full `EventScope.Bench` run with committed baselines, and measuring
-  M1's five acceptance criteria (build plan §6) for real via `dotnet-counters` / a
-  render-tick histogram — the benchmark classes exist, they just haven't been run yet.
-  `v0.1.0` gets tagged once Kafka closes M1.
+- **Heap growth and shutdown latency — root-cause before or alongside M2.** M1c measured
+  ~470–500 MB of heap growth over a 60s 10k msg/s run (budget: 50 MB) and a >30s shutdown
+  delay after stopping — both real, both unexplained. See
+  `tests/EventScope.Bench/baselines/acceptance/README.md` for the numbers and candidate
+  causes (the 256 MB byte budget's own buffering, GC lag vs. a real leak, `MessageRowsView`
+  ring growth). Not fixed in M1c — needs dedicated investigation, not a tack-on.
 - **M2 — storage discipline and search.** Day-file rolling, retention/eviction, FTS5
   tiered search (`body_fts` / `ident_fts`), pinned JSON-field columns, settings view.
 - **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for
@@ -392,8 +544,9 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    properties are needed on .NET 10; that documented configuration reproduces the bug.
    Running the test executables directly works and is xUnit v3 native model, so
    `build/Run-Tests.ps1` does that, and both workflows call it instead of `dotnet test`.
-   The suite is **44 tests, all passing** (12 App.Tests, 20 Core.Tests, 12 Storage.Tests) as
-   of M1b — up from 31 at M1a, 5 at Stage 1. *Revisit after an xunit.v3 or MTP version
+   The suite is **63 tests** (2 Acceptance.Tests, 13 App.Tests, 16 Brokers.Kafka.Tests, 20
+   Core.Tests, 12 Storage.Tests; 4 correctly skipped without a broker/soak flag) as of M1c —
+   up from 44 at M1b, 31 at M1a, 5 at Stage 1. *Revisit after an xunit.v3 or MTP version
    bump - if it starts working, delete the script and put `dotnet test` back.*
    
    Also confirmed this pass: `Run-Tests.ps1`'s own execution of the test `.exe`s is exactly
@@ -432,6 +585,25 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    rebuild) has also run clean in the same session, so the trigger looks tied to rebuild
    freshness specifically, not Debug-vs-Release per se — not fully isolated yet.
 
+   **A second, distinct hang found at M1c, in Release this time, tied to Avalonia headless +
+   real async I/O rather than a rebuild.** The very first real async file I/O
+   (`RandomAccess`-based, e.g. `SegmentReader.ReadAsync`) issued in a Release
+   `EventScope.App.Tests` process after Avalonia's headless platform initializes, before
+   anything has pumped the dispatcher, can hang indefinitely with near-zero CPU — no throw,
+   no Code-Integrity/WER trace, same signature as the Debug hang above but a different
+   trigger (this one is order/first-operation dependent, not rebuild-freshness dependent, and
+   is non-deterministic even holding the binary fixed). **Reproduces against a pre-existing,
+   already-shipped test** (`IngestPipelineStorageTests`) when it happens to run in isolation
+   or first — confirmed latent before M1c, not introduced by it. Four fixes tried and
+   confirmed **not** to resolve it: `ConfigureAwait(false)` at the await call site; pumping
+   the dispatcher once in `HeadlessFixture.EnsureInitialized()`; showing and pumping a
+   throwaway `Window` during that same setup; `ThreadPool.SetMinThreads`. Worked around for
+   the two new M1c storage-acceptance tests by moving them to a new project
+   (`tests/EventScope.Acceptance.Tests`) with no Avalonia reference at all — confirmed
+   reliable there. The normal (non-`EVENTSCOPE_SOAK`) `EventScope.App.Tests` suite is
+   confirmed unaffected across repeated runs; the risk is specifically in soak/heavy-load
+   conditions or single-method isolation. Left open for a real fix.
+
    **A working recipe for driving the real GUI app, established this pass:** Windows UI
    Automation from PowerShell (`Add-Type -AssemblyName UIAutomationClient`) can find
    controls by their accessible `Name` (`AutomationElement.FindFirst` with a
@@ -452,16 +624,20 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    locally. **Decide before going public:** keep it, or gitignore it and keep it local
    only. Nothing is blocked while the repo is private.
 
-4. **Release signing for distributed builds.** Unchanged. SignPath Foundation free
-   open-source programme is the intended no-cost path, wired into `release.yml` between the
-   upload-artifact and create-release steps. Deliberately deferred until v0.1.0 exists -
+4. **Release signing for distributed builds.** SignPath Foundation free open-source
+   programme is the intended no-cost path, wired into `release.yml` between the
+   upload-artifact and create-release steps. Was deliberately deferred until v0.1.0 exists -
    their review assesses a working project, and applying with an empty scaffold weakens it.
-   Recompute the SHA256 after signing; signing changes the hash.
+   **`v0.1.0` is tagged as of this pass, so applying to SignPath is now unblocked** - it's
+   your call whether to apply now. Recompute the SHA256 after signing; signing changes the
+   hash.
 
-5. **No live broker access on this machine.** Unchanged. Broker sources are written and
-   unit-tested against mocked client surfaces; integration tests are opt-in via
-   `EVENTSCOPE_KAFKA_BOOTSTRAP` and friends and skipped by default. If you want these proven
-   against a real broker before M4 is "done", that needs a broker endpoint to point at.
+5. **No live broker access on this machine.** Unchanged in substance: `KafkaEventSource` is
+   now written and unit-tested against a mocked `IConsumer<byte[],byte[]>` surface (M1c);
+   integration tests are opt-in via `EVENTSCOPE_KAFKA_BOOTSTRAP`/`EVENTSCOPE_KAFKA_TOPIC` and
+   skip by default - confirmed skipping cleanly on this machine. If you want Kafka proven
+   against a real broker (not just mocks) before treating it as done, that needs a broker
+   endpoint to point at, same as ASB/SQS will need before M4 is "done".
 
 GitHub repository creation and the initial push remain yours. There is still no remote, so
 neither workflow has ever executed - expect the first push to surface ordinary CI teething

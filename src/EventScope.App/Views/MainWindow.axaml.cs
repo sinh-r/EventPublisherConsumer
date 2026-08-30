@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Closing += OnClosing;
+        MaybeStartMeasurementSession();
     }
 
     private void OnLoadingRow(object? sender, DataGridRowEventArgs e)
