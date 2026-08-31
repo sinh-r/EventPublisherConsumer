@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Specialized;
 using System.Globalization;
 using Avalonia.Collections;
+using EventScope.App.Search;
 using EventScope.App.ViewModels;
 using EventScope.Core.Models;
 
@@ -53,6 +54,16 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
     private readonly Dictionary<int, MessageRowViewModel> _realized = new();
     private readonly Stack<MessageRowViewModel> _pool = new();
     private MessageRowViewModel? _selected;
+
+    /// <summary>The instant tier of tiered search (build plan §5 M2). Recomputed for every
+    /// realized row on every populate, including the steady-state refresh that raises no
+    /// collection notification — so a query change only needs a <see cref="ForceReset"/> to
+    /// show up immediately on whatever's already realized; it doesn't need its own live
+    /// subscription machinery the way the M1-remainder row-styling investigation found
+    /// prohibitively expensive for class state (see <c>RowStateClassSync</c>'s remarks) -
+    /// <see cref="MessageRowViewModel.IsSearchHit"/> is a plain property, not a Classes.Set
+    /// call, so it doesn't carry that cost.</summary>
+    private readonly RingSearchFilter _searchFilter = new();
 
     /// <summary>Test/diagnostic instrumentation only — counts indexer reads.</summary>
     private long _indexerReads;
@@ -172,6 +183,23 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
     {
         var slot = (int)(sequence % _capacity);
         vm.Populate(sequence, in _ring[slot], _subjects[slot], _correlationIds[slot], _previews[slot]);
+
+        vm.IsSearchHit = _searchFilter.IsActive &&
+            (_searchFilter.Matches(_previews[slot])
+             || _searchFilter.Matches(_subjects[slot])
+             || _searchFilter.Matches(_correlationIds[slot]));
+    }
+
+    /// <summary>Sets (or clears, with <see langword="null"/> or empty) the instant search
+    /// query and immediately refreshes every currently realized row against it — a query
+    /// change must show up on-screen right away, not wait for the next ingest tick.</summary>
+    public void SetSearchQuery(string? query)
+    {
+        _searchFilter.SetQuery(query);
+        foreach (var (index, vm) in _realized)
+        {
+            PopulateAt(vm, _windowBaseSeq + index);
+        }
     }
 
     /// <summary>Hook this to <c>DataGrid.UnloadingRow</c>. Recycles the row's view model

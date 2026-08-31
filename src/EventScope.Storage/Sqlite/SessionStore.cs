@@ -46,6 +46,10 @@ public sealed class SessionStore : IDisposable
         OpenCurrentDay();
     }
 
+    /// <summary>The root all day directories live under — needed by search, which iterates
+    /// every day file rather than just the current one.</summary>
+    public string RootDirectory => _rootDirectory;
+
     public string CurrentDay { get; private set; }
     public string Directory { get; private set; } = null!;
     public SqliteBatchWriter Writer { get; private set; } = null!;

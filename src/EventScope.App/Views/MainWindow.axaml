@@ -97,13 +97,32 @@
                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
         </Border>
 
-        <!-- Search bar. Present for layout fidelity; tiered search against SQLite is M2. -->
+        <!-- Search bar. Two tiers wired here (build plan §5 M2): the instant ring filter
+             (every keystroke, no delay - highlights matching rows already on screen) and
+             body FTS (debounced, reports a match count and whether the index is current).
+             Deep scan and its overlay, and an identifier-search scope selector, are Stage 5
+             per the build plan's own milestone boundary - see SearchViewModel's remarks. -->
         <Border Grid.Row="3" Background="{DynamicResource Bg}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
-            <TextBox Watermark="Search — wired in M2" IsEnabled="False" VerticalAlignment="Center"
-                     Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
-                     Foreground="{DynamicResource Text}"
-                     FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5" />
+            <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <TextBox Grid.Column="0" Watermark="Search message bodies"
+                         Text="{Binding Search.Query, Mode=TwoWay}"
+                         VerticalAlignment="Center"
+                         Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                         Foreground="{DynamicResource Text}"
+                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="10,0,0,0"
+                            VerticalAlignment="Center">
+                    <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource Muted}"
+                               Text="{Binding Search.StatusText}" />
+                    <TextBlock IsVisible="{Binding !Search.IndexIsCurrent}"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                               Foreground="{DynamicResource Amber}"
+                               Text="index catching up"
+                               ToolTip.Tip="Recent messages may not appear yet — the search index runs only while ingest is idle." />
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- Message grid. MessageRowsView (Rows) implements IDataGridCollectionView + IList
@@ -151,7 +170,20 @@
                      regardless of Padding — measured, not guessed. 70 matches SIZE, the
                      other 4-char header, which renders fully at that width. -->
                 <DataGridTextColumn Header="PART" Width="70" Binding="{Binding Partition}" />
-                <DataGridTextColumn Header="PREVIEW" Width="*" Binding="{Binding Preview}" />
+                <!-- §4.4: a search hit's preview gets an AmberTint background - the same
+                     declarative Classes-binding pattern as the SIZE column above, not the
+                     imperative per-row Classes.Set that the M1-remainder row-styling pass
+                     found expensive at 10k msg/s (see RowStateClassSync's remarks). Scoped to
+                     row-level (whole preview cell), not per-substring, as a proportional
+                     simplification of §4.4's literal "matched substring" spec. -->
+                <DataGridTemplateColumn Header="PREVIEW" Width="*">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Preview}" Classes.searchHit="{Binding IsSearchHit}"
+                                       VerticalAlignment="Center" Margin="6,0" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
             </DataGrid.Columns>
             <DataGrid.Styles>
                 <Style Selector="DataGridColumnHeader">
@@ -194,6 +226,10 @@
                      every TextBlock.large in this tree is that one cell, so an unqualified
                      TextBlock selector is safe here without further scoping. -->
                 <Style Selector="TextBlock.large">
+                    <Setter Property="Foreground" Value="{DynamicResource Amber}" />
+                </Style>
+                <Style Selector="TextBlock.searchHit">
+                    <Setter Property="Background" Value="{DynamicResource AmberTint}" />
                     <Setter Property="Foreground" Value="{DynamicResource Amber}" />
                 </Style>
             </DataGrid.Styles>
@@ -267,6 +303,11 @@
                            FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
                            Foreground="{DynamicResource Muted}"
                            Text="{Binding StatusBar.UiDropped, StringFormat='{}{0:N0} ui-dropped'}" />
+                <TextBlock Grid.Column="2" Margin="16,0,0,0" HorizontalAlignment="Left"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                           Foreground="{DynamicResource Muted}"
+                           IsVisible="{Binding StatusBar.HasIndexLag}"
+                           Text="{Binding StatusBar.IndexLag, StringFormat='{}{0:N0} rows behind index'}" />
                 <Button Grid.Column="3" Command="{Binding TogglePinCommand}"
                         IsVisible="{Binding StatusBar.IsPinned}"
                         Background="Transparent" BorderBrush="{DynamicResource Accent}"

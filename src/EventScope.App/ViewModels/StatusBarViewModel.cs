@@ -31,7 +31,18 @@ public partial class StatusBarViewModel : ObservableObject
     [ObservableProperty]
     public partial long PinnedNewCount { get; set; }
 
-    public void Update(long totalAppended, long uiDropped, int visibleRowCount, long byteBudgetUsed, long byteBudgetLimit, bool isPinned, long pinnedNewCount)
+    /// <summary>Rows the FTS index is behind by — <c>MAX(messages.id) - fts_hwm</c> on the
+    /// current day file. A first-class metric per the build plan (§3.4): the index can fall
+    /// meaningfully behind under sustained high-throughput ingest, since indexing only runs
+    /// while the batch writer is otherwise idle.</summary>
+    [ObservableProperty]
+    public partial long IndexLag { get; set; }
+
+    public bool HasIndexLag => IndexLag > 0;
+
+    partial void OnIndexLagChanged(long value) => OnPropertyChanged(nameof(HasIndexLag));
+
+    public void Update(long totalAppended, long uiDropped, int visibleRowCount, long byteBudgetUsed, long byteBudgetLimit, bool isPinned, long pinnedNewCount, long indexLag)
     {
         TotalAppended = totalAppended;
         UiDropped = uiDropped;
@@ -42,5 +53,6 @@ public partial class StatusBarViewModel : ObservableObject
         MeterIsHot = MeterFraction >= 0.9;
         IsPinned = isPinned;
         PinnedNewCount = pinnedNewCount;
+        IndexLag = indexLag;
     }
 }

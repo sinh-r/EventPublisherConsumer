@@ -832,6 +832,98 @@ catches up) in `EventScope.Storage.Tests`.
 
 ---
 
+### M2 step 6 — tiered search and its UI (this pass)
+
+All three tiers from the build plan now exist and are wired into the running app; the search
+bar in `MainWindow.axaml` is no longer `IsEnabled="False"`.
+
+**Instant tier — `RingSearchFilter`** (`EventScope.App/Search/`), a thin wrapper over
+`SearchValues<string>` per the plan's own phrasing ("SIMD substring search across 50k
+previews, which is what makes the 'instant' scope instant"). `MessageRowsView.SetSearchQuery`
+recomputes every realized row's `MessageRowViewModel.IsSearchHit` against preview, subject,
+and correlation id — inside `PopulateAt`, the same place header/content fields are already
+refreshed, so it rides the existing per-tick refresh instead of needing its own live
+subscription. That choice is deliberate, not incidental: the M1-remainder row-styling pass
+found that an *imperative* `Classes.Set`-driven subscription for `large`/`evicted`/
+`deadLettered` caused a 4–6x heap-growth regression (see that pass's writeup and
+`RowStateClassSync`'s remarks). `IsSearchHit` avoids that entirely two ways at once — it's a
+plain `[ObservableProperty]` (no imperative `Classes.Set` call at all), and the PREVIEW
+column's highlight is wired via a *declarative* `Classes.searchHit="{Binding IsSearchHit}"`
+binding on that cell's own `TextBlock` (`MainWindow.axaml`), the same safe pattern already
+proven for the SIZE column's `.large` binding. A query change calls `ForceReset`-equivalent
+immediate re-evaluation of every currently realized row so typing shows results without
+waiting for the next ingest tick.
+
+**FTS tier — `FtsSearchService`** (`EventScope.Storage/Search/`). Queries day files
+newest-first via `SessionStore.ListDayDirectories()`, stopping the moment `maxResults` is
+reached — early exit means an older day is never even opened once enough results already
+came from newer ones. Every hit carries `IndexHwm`, stamped from that day's own
+`index_state.fts_hwm` (build plan: "every FTS result set is stamped with its IndexHwm so the
+UI can state whether results are current"). Each day gets its own short-lived, read-only
+connection per query (§3.6) — never the live `SqliteBatchWriter` connection, safe to run
+concurrently with ingest under WAL. An identifier query under 3 characters — the trigram
+tokenizer's floor — automatically falls back to a `LIKE '%x%'` scan of `messages` directly
+instead of querying `ident_fts`, confirmed by a dedicated test rather than assumed from the
+plan's text.
+
+**Deep-scan tier — `DeepScanner`** (`EventScope.Storage/Search/`). Streams every message's
+**full** body via `SegmentReader` — not the 2 KB `body_head` copy `body_fts` indexes — so it
+finds matches FTS structurally cannot see, and doesn't depend on the index being caught up.
+An `IAsyncEnumerable<DeepScanMatch>` with `IProgress<long>` reporting and per-row
+cancellation, so a caller streaming into a bounded UI list never holds a large result set or
+a long-lived read transaction (§3.4's WAL-starvation note). Backend only this pass — its
+overlay UI is Stage 5 per the build plan's own milestone boundary (§5 lists "deep-search
+overlay" under Stage 5, not M2), so wiring it up now would be scope the plan itself doesn't
+call for yet.
+
+**Search bar UI** (`SearchViewModel`, new): one text box drives both the instant tier
+(every keystroke) and a 150 ms-debounced FTS body search reporting a match count and an
+"index catching up" indicator when the matched day's hwm is behind the session's own total
+ingested count. **Scoped down from the full spec on purpose**, consistent with prior passes'
+proportionality calls: identifier-search has no scope selector in the UI yet (the backend
+method exists — `SearchIdentifiersAsync`), and search-hit highlighting is a whole-cell
+background on the PREVIEW column rather than per-substring inline highlighting (§4.4's
+literal spec) — building real inline rich-text highlighting inside a virtualized grid cell
+is closer to Stage 5 polish than to "wire search into the grid." The status bar also gained
+`IndexLag` (`StatusBarViewModel`, refreshed each stats tick from
+`SqliteBatchWriter.IndexLag`), visible only when nonzero.
+
+**A real, load-bearing SQLite/FTS5 finding from step 5 paid off immediately here**: every
+query in `FtsSearchService` double-quotes its search term as a literal phrase before binding
+it, because a bare `-` is FTS5's NOT operator (a correlation id shaped like `c-1` would
+otherwise parse as "match `c`, exclude `1`") — found once already, applied correctly the
+first time in new code rather than rediscovered.
+
+**Manually verified against the real app's live-accumulated database**, not just tests: a
+body search for a term present in every message returned results in correct newest-first
+order, correctly capped at the requested limit, with `IndexHwm` matching the actual high-water
+mark and `IndexLag` reading `0` on a caught-up index.
+
+Tests: 104, up from 84 — 20 new. `RingSearchFilterTests` ×4 and
+`MessageRowsViewSearchTests` ×5 in `EventScope.App.Tests` (search-hit marking, matching
+against subject/correlation id too, clearing immediately, a row realized *after* the query
+was set still gets evaluated, and — mirroring the M1-remainder row-styling regression this
+design was built to avoid — a steady-state refresh recomputes search-hit state for a row's
+*new* content instead of leaving a stale result behind). `FtsSearchServiceTests` ×5 and
+`DeepScannerTests` ×6 in `EventScope.Storage.Tests` (newest-first with early exit across a
+real rollover-produced multi-day layout, the trigram length fallback both ways, a deep-scan
+match beyond the 2 KB body_head cap, progress reporting, and cancellation).
+
+**Two found-while-testing corrections, same spirit as step 5's:**
+1. `DeepScannerTests` initially failed across the board with empty results — not a
+   `DeepScanner` bug. A freshly-written small payload sits in `SegmentWriter`'s in-memory
+   pending block until enough accumulates to flush (PROGRESS.md §0.1, from M1b); `DeepScanner`
+   reads only from disk, so tests needed the same force-a-large-filler-append pattern
+   `SessionStoreRolloverTests` already uses. Fixed in the tests, not the scanner.
+2. A progress-reporting test asserted exact delivery order and failed
+   (`[2,5,4,3,1]` instead of `[1,2,3,4,5]`) — measured, not assumed: `Progress<T>` posts
+   each report via `SynchronizationContext.Post`, and with none installed (a console test
+   host) falls back to `ThreadPool.QueueUserWorkItem` per report, which does not preserve
+   call order across separate work items. This is `Progress<T>`'s own documented behavior,
+   not a `DeepScanner` defect — the test now checks the received *set*, not the order.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -844,10 +936,9 @@ catches up) in `EventScope.Storage.Tests`.
   heap-growth regression (see above and `RowStateClassSync.cs`). A declarative binding
   approach is untried and may be cheaper — worth a look before M2's UI work if this needs to
   be fully correct rather than just visually adequate most of the time.
-- **M2, remaining.** Day-file rolling, retention/eviction, and the FTS indexer are done (see
-  above). Still pending: tiered search against `body_fts`/`ident_fts` (the search bar itself
-  is still `IsEnabled="False"` in `MainWindow.axaml`), pinned JSON-field columns, settings
-  view.
+- **M2, remaining.** Day-file rolling, retention/eviction, the FTS indexer, and tiered search
+  (instant/FTS/deep-scan) are done (see above). Still pending: pinned JSON-field columns, a
+  settings view, and the chaos soak test.
 - **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for
   cycle detection), JSON tree editor, preview pane, schema inference, burst publish.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the

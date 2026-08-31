@@ -5,6 +5,7 @@ using EventScope.App.Collections;
 using EventScope.App.Ingest;
 using EventScope.Brokers.Kafka;
 using EventScope.Storage.Retention;
+using EventScope.Storage.Search;
 using EventScope.Storage.Sqlite;
 
 namespace EventScope.App.ViewModels;
@@ -46,8 +47,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public DetailPaneViewModel Detail { get; } = new();
 
+    public SearchViewModel Search { get; }
+
     public MainWindowViewModel()
     {
+        Search = new SearchViewModel(Rows, () => _sessionStore is null ? null : new FtsSearchService(_sessionStore));
         _statsTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(250),
@@ -162,7 +166,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             byteBudgetUsed: _pipeline?.ByteBudgetUsed ?? 0,
             byteBudgetLimit: _pipeline?.ByteBudgetLimit ?? 0,
             isPinned: Rows.IsPinned,
-            pinnedNewCount: Rows.PinnedNewCount);
+            pinnedNewCount: Rows.PinnedNewCount,
+            indexLag: _sessionStore?.Writer.IndexLag ?? 0);
     }
 
     public async ValueTask DisposeAsync()

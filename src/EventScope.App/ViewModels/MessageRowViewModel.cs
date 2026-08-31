@@ -46,6 +46,12 @@ public partial class MessageRowViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsDeadLettered { get; set; }
 
+    /// <summary>Set by <see cref="Collections.MessageRowsView"/>, not by <see cref="Populate"/>
+    /// itself — search state is orthogonal to a row's own header/content and is recomputed
+    /// against the live <see cref="Search.RingSearchFilter"/> query on every populate.</summary>
+    [ObservableProperty]
+    public partial bool IsSearchHit { get; set; }
+
     /// <summary>
     /// Repopulates this instance in place for <paramref name="sequence"/>. Called both
     /// when a row is first realized and, in follow mode, on every coalescer tick for
