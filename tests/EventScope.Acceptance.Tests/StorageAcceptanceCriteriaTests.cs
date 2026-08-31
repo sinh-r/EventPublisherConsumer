@@ -130,8 +130,7 @@ public sealed class StorageAcceptanceCriteriaTests
                 // multi-minute run for no added correctness signal — this ratio still
                 // saturates without being pathologically slow.
                 var pipeline = new IngestPipeline(
-                    source, rows, ticker,
-                    sessionStore.SegmentWriter, sessionStore.Writer, sessionStore.SegmentReader,
+                    source, rows, ticker, sessionStore,
                     byteBudgetLimit: byteBudgetLimit,
                     hotPayloadCapacity: 64);
 

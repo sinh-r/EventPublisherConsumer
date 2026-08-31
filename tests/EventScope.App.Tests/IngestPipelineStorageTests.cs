@@ -44,8 +44,7 @@ public sealed class IngestPipelineStorageTests : IDisposable
             var ticker = new ManualTicker();
 
             var pipeline = new IngestPipeline(
-                source, rows, ticker,
-                sessionStore.SegmentWriter, sessionStore.Writer, sessionStore.SegmentReader,
+                source, rows, ticker, sessionStore,
                 hotPayloadCapacity: 64); // small on purpose: forces most reads through the cold segment path
 
             pipeline.Start();

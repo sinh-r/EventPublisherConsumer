@@ -27,4 +27,18 @@ public abstract record WriteOp
         byte Flags,
         string? Preview,
         string? BodyHead) : WriteOp;
+
+    /// <summary>Retention's eviction marker for one segment's rows, scoped by
+    /// <paramref name="SegmentId"/> rather than per-row id since eviction always acts on a
+    /// whole segment at once. Never touches <c>body_head</c>/<c>message_id</c>/
+    /// <c>correlation_id</c> — those are FTS-indexed external content, and changing them
+    /// after indexing makes results silently wrong (build plan §3.4). <c>flags</c> is not
+    /// indexed, so OR-ing a bit into it here is safe.</summary>
+    public sealed record SetFlags(int SegmentId, byte FlagsToOr) : WriteOp;
+
+    /// <summary>Runs <c>PRAGMA wal_checkpoint(TRUNCATE)</c> on the writer's own thread and
+    /// connection — the only place a checkpoint may run without contending with the live
+    /// write connection (build plan §3.4's WAL-starvation note). Posted by
+    /// <c>EventScope.Storage.Retention.RetentionService</c> when idle, never by ingest.</summary>
+    public sealed record Checkpoint : WriteOp;
 }

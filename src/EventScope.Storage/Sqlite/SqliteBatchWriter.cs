@@ -65,6 +65,8 @@ public sealed class SqliteBatchWriter : IDisposable
     {
         var pending = new List<WriteOp.InsertMessage>(BatchRowLimit);
         var barriers = new List<TaskCompletionSource>();
+        var flagUpdates = new List<WriteOp.SetFlags>();
+        var checkpointRequested = false;
 
         try
         {
@@ -85,6 +87,12 @@ public sealed class SqliteBatchWriter : IDisposable
                         case WriteOp.InsertMessage insert:
                             pending.Add(insert);
                             break;
+                        case WriteOp.SetFlags setFlags:
+                            flagUpdates.Add(setFlags);
+                            break;
+                        case WriteOp.Checkpoint:
+                            checkpointRequested = true;
+                            break;
                         case FlushBarrier barrier:
                             barriers.Add(barrier.Completion);
                             break;
@@ -95,6 +103,18 @@ public sealed class SqliteBatchWriter : IDisposable
                 {
                     CommitBatch(pending);
                     pending.Clear();
+                }
+
+                if (flagUpdates.Count > 0)
+                {
+                    foreach (var setFlags in flagUpdates) ApplySetFlags(setFlags);
+                    flagUpdates.Clear();
+                }
+
+                if (checkpointRequested)
+                {
+                    RunCheckpoint();
+                    checkpointRequested = false;
                 }
 
                 foreach (var barrier in barriers) barrier.TrySetResult();
@@ -162,6 +182,22 @@ public sealed class SqliteBatchWriter : IDisposable
         }
 
         transaction.Commit();
+    }
+
+    private void ApplySetFlags(WriteOp.SetFlags op)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "UPDATE messages SET flags = flags | $flags WHERE segment_id = $segmentId";
+        command.Parameters.AddWithValue("$flags", op.FlagsToOr);
+        command.Parameters.AddWithValue("$segmentId", op.SegmentId);
+        command.ExecuteNonQuery();
+    }
+
+    private void RunCheckpoint()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        command.ExecuteNonQuery();
     }
 
     public void Dispose()

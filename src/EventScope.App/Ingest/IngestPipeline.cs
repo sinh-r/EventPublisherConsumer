@@ -4,7 +4,6 @@ using EventScope.App.Collections;
 using EventScope.Core.Abstractions;
 using EventScope.Core.Ingest;
 using EventScope.Core.Models;
-using EventScope.Storage.Segments;
 using EventScope.Storage.Sqlite;
 
 namespace EventScope.App.Ingest;
@@ -14,11 +13,14 @@ namespace EventScope.App.Ingest;
 /// byte-budgeted channel &#8594; segment write + preview/body_head shaping &#8594; SQLite
 /// batch write &#8594; <see cref="IngestCoalescer"/> &#8594; <see cref="MessageRowsView.AppendBatch"/>.
 ///
-/// <see cref="SegmentWriter"/> and <see cref="SqliteBatchWriter"/> are owned by the caller's
-/// <see cref="SessionStore"/> and outlive any single pipeline instance — segment and day
-/// files persist across a Start/Stop toggle, they don't reset with the connection. Only the
-/// hot in-memory payload ring (<see cref="PayloadReader"/>'s fast path) is scoped to this
-/// pipeline, since it's keyed by a sequence counter that restarts at 0 each Start.
+/// <see cref="SessionStore"/> is owned by the caller and outlives any single pipeline
+/// instance — segment and day files persist across a Start/Stop toggle, they don't reset
+/// with the connection. <see cref="SessionStore.EnsureCurrentDay"/> is called before every
+/// ingest write so a day rollover is never missed, and every write goes through
+/// <c>_sessionStore.SegmentWriter</c>/<c>.Writer</c> freshly each time rather than a cached
+/// reference, since rollover can swap which day those point at. Only the hot in-memory
+/// payload ring (<see cref="PayloadReader"/>'s fast path) is scoped to this pipeline, since
+/// it's keyed by a sequence counter that restarts at 0 each Start.
 /// </summary>
 public sealed class IngestPipeline : IAsyncDisposable
 {
@@ -28,8 +30,7 @@ public sealed class IngestPipeline : IAsyncDisposable
     private readonly Channel<RawMessage> _channel;
     private readonly ChannelWriter<RawMessage> _budgetedWriter;
     private readonly IngestCoalescer _coalescer;
-    private readonly SegmentWriter _segmentWriter;
-    private readonly SqliteBatchWriter _batchWriter;
+    private readonly SessionStore _sessionStore;
     private readonly InMemoryPayloadStore _hotStore;
     private readonly CancellationTokenSource _cts = new();
 
@@ -41,16 +42,13 @@ public sealed class IngestPipeline : IAsyncDisposable
         IEventSource source,
         MessageRowsView rows,
         IUiTicker ticker,
-        SegmentWriter segmentWriter,
-        SqliteBatchWriter batchWriter,
-        IPayloadReader coldPayloadReader,
+        SessionStore sessionStore,
         long byteBudgetLimit = 256 * 1024 * 1024,
         int hotPayloadCapacity = 4096)
     {
         _source = source;
         _rows = rows;
-        _segmentWriter = segmentWriter;
-        _batchWriter = batchWriter;
+        _sessionStore = sessionStore;
         _byteBudget = new ByteBudget(byteBudgetLimit);
         _channel = Channel.CreateBounded<RawMessage>(new BoundedChannelOptions(4096)
         {
@@ -62,7 +60,7 @@ public sealed class IngestPipeline : IAsyncDisposable
         _budgetedWriter = new BudgetedChannelWriter(_channel.Writer, _byteBudget);
 
         _hotStore = new InMemoryPayloadStore(hotPayloadCapacity);
-        PayloadReader = new CompositePayloadReader(_hotStore, coldPayloadReader);
+        PayloadReader = new CompositePayloadReader(_hotStore, new SessionStorePayloadReader(sessionStore));
 
         _coalescer = new IngestCoalescer(ticker);
         _coalescer.BatchReady += OnBatchReady;
@@ -124,6 +122,8 @@ public sealed class IngestPipeline : IAsyncDisposable
 
     private void Ingest(RawMessage message)
     {
+        _sessionStore.EnsureCurrentDay();
+
         var sequence = _sequence++;
         var subject = message.Subject ?? string.Empty;
         var correlationId = message.CorrelationId ?? string.Empty;
@@ -132,7 +132,7 @@ public sealed class IngestPipeline : IAsyncDisposable
         if (message.Body.Length > 64 * 1024) flags |= MessageFlags.IsLarge;
         if (message.IsDeadLettered) flags |= MessageFlags.IsDeadLettered;
 
-        var (segmentId, offset, length) = _segmentWriter.Append(message.Body);
+        var (segmentId, offset, length) = _sessionStore.SegmentWriter.Append(message.Body);
         _hotStore.Store(sequence, message.Body);
 
         // §4.4: large rows replace the preview with this text rather than showing (a
@@ -155,7 +155,7 @@ public sealed class IngestPipeline : IAsyncDisposable
             partition: (short)(message.Partition ?? 0),
             flags: flags);
 
-        _batchWriter.Enqueue(new WriteOp.InsertMessage(
+        _sessionStore.Writer.Enqueue(new WriteOp.InsertMessage(
             EnqueuedTicks: message.EnqueuedTicks,
             ReceivedTicks: message.ReceivedTicks,
             SegmentId: segmentId,

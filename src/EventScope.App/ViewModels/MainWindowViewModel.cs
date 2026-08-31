@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Collections;
 using EventScope.App.Ingest;
 using EventScope.Brokers.Kafka;
+using EventScope.Storage.Retention;
 using EventScope.Storage.Sqlite;
 
 namespace EventScope.App.ViewModels;
@@ -18,9 +19,15 @@ namespace EventScope.App.ViewModels;
 /// </summary>
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
+    // Defaults until Stage 7's settings view exists to make these user-configurable, per
+    // the build plan's M2 task list.
+    private const long DefaultRetentionCapBytes = 2L * 1024 * 1024 * 1024;
+    private const int DefaultRetentionDays = 14;
+
     private readonly DispatcherTimer _statsTimer;
     private IngestPipeline? _pipeline;
     private SessionStore? _sessionStore;
+    private RetentionService? _retentionService;
     private long _lastStatsTotal;
     private DateTime _lastStatsTimeUtc;
 
@@ -70,6 +77,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (_pipeline is not null) return;
 
         _sessionStore ??= new SessionStore(DefaultSessionRootDirectory());
+        _retentionService ??= new RetentionService(
+            DefaultSessionRootDirectory(), _sessionStore, DefaultRetentionCapBytes, DefaultRetentionDays);
 
         // EventSourceFactory reads EVENTSCOPE_KAFKA_BOOTSTRAP/TOPIC to pick a real
         // KafkaEventSource instead of the default FakeEventSource — see its remarks. Nothing
@@ -91,9 +100,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             source,
             Rows,
             new DispatcherTimerTicker(),
-            _sessionStore.SegmentWriter,
-            _sessionStore.Writer,
-            _sessionStore.SegmentReader);
+            _sessionStore);
         _pipeline.Start();
 
         Toolbar.IsRunning = true;
@@ -166,6 +173,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await _pipeline.DisposeAsync().ConfigureAwait(true);
         }
 
+        _retentionService?.Dispose();
         _sessionStore?.Dispose();
     }
 }

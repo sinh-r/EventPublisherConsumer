@@ -675,6 +675,103 @@ the code they tested once the measurement showed the fix itself was the worse de
 
 ---
 
+## M2 — storage discipline and search
+
+M1's remainder is closed; this begins the largest unbuilt milestone. Storage discipline
+(day-file rolling, retention, FTS search) first, per the build plan's own M2 task order.
+
+### M2 step 4 — day-file rolling and retention (this pass)
+
+**`SessionStore` rebuilt as a multi-day owner.** M1b's version opened one fixed day for the
+whole process lifetime. Now: `Writer`/`SegmentWriter`/`SegmentReader` always refer to the
+current day; `EnsureCurrentDay()` — called from `IngestPipeline.Ingest` before every write —
+rolls to a new day the moment `TimeProvider.GetUtcNow()`'s date moves past the currently open
+one. Both files stay usable across the boundary: the old writer and segment writer are
+disposed (drain + seal) on a background `Task.Run`, never inline, so a rollover can never
+stall ingest into the new day the way the build plan's own retention criterion forbids for
+deletion — this was a deliberate design choice, not an oversight, since `SqliteBatchWriter.Dispose()`'s
+`Thread.Join()` would otherwise block the calling (ingest) thread for however long the old
+day's backlog takes to drain.
+
+**A deviation from the plan's literal phrasing, found while implementing it.** §3.6 describes
+rollover as "a `WriteOp` on the *old* writer's queue." No new `WriteOp` case was added for
+it: `SqliteBatchWriter.Dispose()` already does exactly what that op would — `CompleteAdding()`
+then `Join()` drains everything queued before the call, then closes — so a dedicated op would
+just reimplement it. Calling `Dispose()` from the background task achieves the same effect
+with less code.
+
+**Cross-day reads.** A `MessageHeader`'s `SegmentId`/`Offset` are only meaningful within the
+day directory they were written to — segment ids restart at 0 every day — so the detail
+pane's cold read path needed to learn which day a row belongs to before it can look anything
+up. New `SessionStorePayloadReader` (`EventScope.App/Ingest/`) derives the day from
+`MessageHeader.EnqueuedTicks` (UTC, same `yyyy-MM-dd` format `SessionStore` uses for its own
+day strings, so the two can never disagree) and asks `SessionStore.GetOrOpenReader(day)` for
+the right reader — opened lazily, kept for the store's whole lifetime once opened. Replaces
+the fixed single-`SegmentReader` cold reader `IngestPipeline` used to take directly.
+`IngestPipeline`'s constructor now takes `SessionStore` itself rather than
+`SegmentWriter`/`SqliteBatchWriter`/`IPayloadReader` separately, since every write must
+freshly re-read `SessionStore.SegmentWriter`/`.Writer` each time (rollover can swap which day
+those point at) rather than caching them at construction.
+
+**`RetentionService`** (`EventScope.Storage/Retention/`, new) — `PeriodicTimer`, driven by
+`TimeProvider` so both the interval and the age cutoff are fake-clock testable. Two passes,
+run together every tick:
+- **Age-based deletion.** Any day directory older than the retention window is dropped
+  whole via `SessionStore.DeleteDay` — never the current day, regardless of how old the
+  fake clock says "today" is (a real edge case a naive date-diff would get wrong, covered by
+  a dedicated test).
+- **Cap enforcement.** Evicts the oldest segment across the *whole store* — oldest day
+  first, lowest segment id within that day — until total on-disk bytes (enumerated directly,
+  so `-wal`/`-shm` files count toward the cap same as everything else) drop back under the
+  configured limit. Eviction means `SessionStore.EnqueueSetFlags(day, segmentId,
+  PayloadEvicted)` (new `WriteOp.SetFlags`, scoped by `segment_id` not per-row id — never
+  touches `body_head`/`message_id`/`correlation_id`, the FTS-indexed columns, exactly per
+  §3.4's warning) followed by deleting the segment file. The segment a live writer is still
+  appending to is never a candidate, checked via `SessionStore.CurrentSegmentId`. A day left
+  with zero segment files after eviction has its `.db` dropped too — nothing in it is
+  reachable anymore.
+- **Routing the flags update correctly.** `SessionStore.EnqueueSetFlags` routes through the
+  live `SqliteBatchWriter` if the target day is current (the only writer allowed to touch
+  that connection, §3.6), or opens a short-lived direct connection for an older, already-
+  sealed day — no live writer exists for those anymore, and none of §3.6's contention
+  concerns apply to a file nothing else is writing to.
+
+**`SqliteBatchWriter` gained two new `WriteOp` cases**, handled between insert batches on its
+own thread/connection: `SetFlags` (above) and `Checkpoint` (`PRAGMA wal_checkpoint(TRUNCATE)`)
+— the latter not yet wired to anything (no caller posts it yet; the plan calls for it to run
+"only when idle," which needs the FTS indexer's idle-detection from step 5 to mean anything).
+Left in place as a ready hook rather than built and immediately dead code that step 5 would
+just re-add.
+
+**A found-and-rejected sub-task from the plan.** The original plan for this step included
+making `SqliteBatchWriter`'s internal 200 ms batch window `TimeProvider`-aware, reasoning
+that a fake-clock rollover test would need it. Turned out false on inspection: rollover's
+day-check lives entirely in `SessionStore`, driven by its own `TimeProvider` calls,
+independent of the batch writer's internal timing — the two were never actually coupled.
+Skipped; noted here so the reasoning isn't silently lost.
+
+**Known, accepted race, not engineered around.** If `RetentionService` runs within the same
+narrow window as a rollover's background seal task (milliseconds, in practice), it could
+attempt to enumerate or delete a day's files while the old writer's `Dispose()` is still
+mid-drain. Not defended against — the retention timer's default 30 s period versus a
+typically-near-instant seal makes this exceedingly unlikely to matter in practice, and
+building real synchronization for it would be disproportionate to the risk. Flagged
+honestly rather than silently assumed away.
+
+Tests: 77, up from 69 — 8 new in `EventScope.Storage.Tests`
+(`SessionStoreRolloverTests` ×3: cross-day reads after rollover, no-op within the same day,
+reading a day that never existed returns empty not a throw; `RetentionServiceTests` ×5:
+age-based deletion, current-day-never-deleted-by-age, cap eviction marks rows and deletes the
+right file, the live segment is never evicted, a day with no segments left drops its `.db`).
+`SettableTimeProvider` (advanceable fake clock) added to that test project.
+
+**Manually verified against the real app**, not just tests: launched `EventScope.exe`
+directly (auto-measure mode, 8 s), confirmed it streams and exits cleanly with the new
+`SessionStore`/`RetentionService`/`IngestPipeline` wiring, and confirmed a real day directory
+was created under `%LOCALAPPDATA%\EventScope\sessions\` by this exact run.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -687,8 +784,9 @@ the code they tested once the measurement showed the fix itself was the worse de
   heap-growth regression (see above and `RowStateClassSync.cs`). A declarative binding
   approach is untried and may be cheaper — worth a look before M2's UI work if this needs to
   be fully correct rather than just visually adequate most of the time.
-- **M2 — storage discipline and search.** Day-file rolling, retention/eviction, FTS5
-  tiered search (`body_fts` / `ident_fts`), pinned JSON-field columns, settings view.
+- **M2, remaining.** Day-file rolling and retention/eviction are done (see above). Still
+  pending: the FTS indexer, `body_fts`/`ident_fts` tiered search, pinned JSON-field columns,
+  settings view.
 - **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for
   cycle detection), JSON tree editor, preview pane, schema inference, burst publish.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the

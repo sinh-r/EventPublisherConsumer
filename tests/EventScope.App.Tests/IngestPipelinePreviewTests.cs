@@ -39,9 +39,7 @@ public sealed class IngestPipelinePreviewTests : IDisposable
         var source = new ScriptedEventSource([shortBody, withNewlines, longBody]);
         var ticker = new ManualTicker();
 
-        var pipeline = new IngestPipeline(
-            source, rows, ticker,
-            sessionStore.SegmentWriter, sessionStore.Writer, sessionStore.SegmentReader);
+        var pipeline = new IngestPipeline(source, rows, ticker, sessionStore);
 
         pipeline.Start();
         await source.Completed.WaitAsync(TimeSpan.FromSeconds(5), Ct);
