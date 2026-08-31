@@ -3,6 +3,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:EventScope.App.ViewModels"
+        xmlns:views="using:EventScope.App.Views"
+        xmlns:publisher="using:EventScope.App.Publisher"
         mc:Ignorable="d" d:DesignWidth="1600" d:DesignHeight="1000"
         x:Class="EventScope.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -15,6 +17,27 @@
         <vm:MainWindowViewModel />
     </Window.DataContext>
 
+    <!-- JSON colouring (build plan §4.5), shared by the publisher preview pane. Declarative
+         Classes bindings on each segment's TextBlock, the same safe pattern as the message
+         grid's own .large/.searchHit classes below. -->
+    <Window.Styles>
+        <Style Selector="TextBlock.key">
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+        </Style>
+        <Style Selector="TextBlock.str">
+            <Setter Property="Foreground" Value="{DynamicResource Green}" />
+        </Style>
+        <Style Selector="TextBlock.num">
+            <Setter Property="Foreground" Value="{DynamicResource Amber}" />
+        </Style>
+        <Style Selector="TextBlock.lit">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+        </Style>
+        <Style Selector="TextBlock.punct">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+        </Style>
+    </Window.Styles>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="36" />
@@ -24,6 +47,15 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="4" />
             <RowDefinition Height="320" MinHeight="120" MaxHeight="620" />
+            <!-- Publisher panel (build plan §5 M3) - Auto rather than a fixed pixel height so
+                 the row collapses to zero when IsPublisherOpen is false (Avalonia excludes an
+                 IsVisible="False" element from layout entirely, so an Auto row sizes to
+                 nothing). Deliberately not drag-resizable like the detail pane's splitter
+                 above - GridSplitter mutates its target RowDefinition's Height directly, which
+                 would turn this row from Auto into a fixed pixel value on the first drag and
+                 defeat the collapse-on-close behaviour; the publisher panel's own inner Border
+                 carries the §4.3 default/clamp numbers as a fixed Height instead. -->
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="28" />
         </Grid.RowDefinitions>
 
@@ -45,7 +77,7 @@
         <!-- Connection toolbar. -->
         <Border Grid.Row="1" Background="{DynamicResource Surf}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" VerticalAlignment="Center">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
                 <Panel Grid.Column="0" Width="8" Height="8" Margin="0,0,8,0">
                     <Ellipse Fill="{DynamicResource Green}" IsVisible="{Binding Toolbar.IsRunning}" />
                     <Ellipse Fill="{DynamicResource Dim}" IsVisible="{Binding !Toolbar.IsRunning}" />
@@ -85,8 +117,16 @@
                            Foreground="{DynamicResource Muted}"
                            Text="{Binding Toolbar.MessagesPerSecond, StringFormat='{}{0:N0} msg/s'}" />
 
-                <Button Grid.Column="6" Content="Settings" Command="{Binding ToggleSettingsCommand}"
+                <!-- Toggles the bottom publisher panel (build plan §5 M3) - a resizable dock,
+                     not a workspace switch, matching the mockup's own onTogglePublisher
+                     button rather than the top tab strip. -->
+                <Button Grid.Column="6" Content="Publish" Command="{Binding TogglePublisherCommand}"
                         Margin="16,0,0,0" Background="Transparent" BorderBrush="{DynamicResource Line}"
+                        Foreground="{DynamicResource Text}" Padding="10,4"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+
+                <Button Grid.Column="7" Content="Settings" Command="{Binding ToggleSettingsCommand}"
+                        Margin="8,0,0,0" Background="Transparent" BorderBrush="{DynamicResource Line}"
                         Foreground="{DynamicResource Text}" Padding="10,4"
                         FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
             </Grid>
@@ -303,8 +343,216 @@
             </Grid>
         </Border>
 
+        <!-- Publisher panel (build plan §5 M3 step 9). x:CompileBindings="False" here for the
+             same reason the message grid above sets it: nested ItemsControls bind to several
+             disparate model types (PublisherNode, PreviewLine, PreviewSegment) rather than the
+             window's own vm:MainWindowViewModel, and setting it once on this subtree is
+             simpler than an x:DataType on every DataTemplate below. -->
+        <Border Grid.Row="7" Height="380" IsVisible="{Binding IsPublisherOpen}"
+                x:CompileBindings="False"
+                Background="{DynamicResource Surf}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="3*,2*">
+                <!-- Tree editor (60%). -->
+                <Grid Grid.Column="0" RowDefinitions="30,22,*">
+                    <Border Grid.Row="0" BorderBrush="{DynamicResource Line2}" BorderThickness="0,0,0,1" Padding="10,0">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="PAYLOAD BUILDER" VerticalAlignment="Center"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                                       LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+                            <Button Grid.Column="2" Content="Add field" Command="{Binding Publisher.AddFieldCommand}"
+                                    Margin="0,0,8,0" Height="22" Padding="8,0"
+                                    Background="Transparent" BorderBrush="{DynamicResource Line}"
+                                    Foreground="{DynamicResource Text}"
+                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="11" />
+                            <Button Grid.Column="3" Content="Regenerate" Command="{Binding Publisher.RegenerateCommand}"
+                                    Height="22" Padding="8,0"
+                                    Background="Transparent" BorderBrush="{DynamicResource Line}"
+                                    Foreground="{DynamicResource Text}"
+                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="11" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1" Background="{DynamicResource Surf2}"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+                        <Grid ColumnDefinitions="*,92,150,210,78">
+                            <TextBlock Grid.Column="0" Text="KEY" Margin="8,0" VerticalAlignment="Center"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5"
+                                       Foreground="{DynamicResource Dim}" />
+                            <TextBlock Grid.Column="1" Text="TYPE" Margin="8,0" VerticalAlignment="Center"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5"
+                                       Foreground="{DynamicResource Dim}" />
+                            <TextBlock Grid.Column="2" Text="VALUE" Margin="8,0" VerticalAlignment="Center"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5"
+                                       Foreground="{DynamicResource Dim}" />
+                            <TextBlock Grid.Column="3" Text="GENERATOR" Margin="8,0" VerticalAlignment="Center"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5"
+                                       Foreground="{DynamicResource Dim}" />
+                        </Grid>
+                    </Border>
+
+                    <!-- One row per flattened tree node. No hover add-sibling/add-child/duplicate
+                         mini-icons here (build plan §4's own mockup markup) — a single header
+                         "Add field" plus a per-row delete covers the same editing capability
+                         with far less interaction-state code; adding nested children under a
+                         non-root object/array is done by first setting a field's own Type to
+                         Object/Array, which is what Type is for. -->
+                    <ScrollViewer Grid.Row="2">
+                        <ItemsControl ItemsSource="{Binding Publisher.Rows}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnDefinitions="*,92,150,210,78" Height="26">
+                                        <Grid.Styles>
+                                            <Style Selector="Grid:pointerover">
+                                                <Setter Property="Background" Value="{DynamicResource Hover}" />
+                                            </Style>
+                                        </Grid.Styles>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="16" Margin="{Binding Depth, Converter={x:Static views:DepthToIndentConverter.Instance}}" />
+                                            <TextBox Text="{Binding Key, Mode=TwoWay}" IsEnabled="{Binding !IsArrayElement}"
+                                                     Height="20" Padding="4,0" BorderThickness="0" Background="Transparent"
+                                                     FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                                     Foreground="{DynamicResource Text}" />
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1" Margin="4,0"
+                                                  ItemsSource="{x:Static publisher:PublisherFieldTypes.All}"
+                                                  SelectedItem="{Binding Type, Mode=TwoWay}"
+                                                  Height="20" FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5" />
+                                        <TextBlock Grid.Column="2" Text="{Binding Value}" Margin="6,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                   IsVisible="{Binding !IsContainer}"
+                                                   FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                                                   Foreground="{DynamicResource Text}" />
+                                        <TextBox Grid.Column="3" Text="{Binding Generator, Mode=TwoWay}"
+                                                 IsVisible="{Binding !IsContainer}" Margin="4,0"
+                                                 Height="20" Padding="4,0" BorderThickness="1"
+                                                 BorderBrush="{DynamicResource Line2}" Background="{DynamicResource Surf2}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="10.5"
+                                                 Foreground="{DynamicResource Accent}" />
+                                        <Button Grid.Column="4" Content="×" Command="{Binding $parent[ItemsControl].DataContext.Publisher.DeleteFieldCommand}"
+                                                CommandParameter="{Binding}"
+                                                HorizontalAlignment="Right" Margin="0,0,7,0"
+                                                Width="17" Height="17" Padding="0"
+                                                Background="Transparent" BorderThickness="0"
+                                                Foreground="{DynamicResource Red}" FontSize="12" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- Preview (40%). -->
+                <Grid Grid.Column="1" RowDefinitions="30,*,40" Background="{DynamicResource Surf}">
+                    <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="8,0">
+                        <ToggleButton Grid.Column="0" Content="Preview" IsChecked="{Binding Publisher.IsPreviewTabSelected}"
+                                      Command="{Binding Publisher.SelectPreviewTabCommand}"
+                                      Background="Transparent" BorderThickness="0"
+                                      Foreground="{DynamicResource Text}" Padding="10,0"
+                                      FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                        <ToggleButton Grid.Column="1" Content="Envelope" IsChecked="{Binding Publisher.IsEnvelopeTabSelected}"
+                                      Command="{Binding Publisher.SelectEnvelopeTabCommand}"
+                                      Background="Transparent" BorderThickness="0"
+                                      Foreground="{DynamicResource Text}" Padding="10,0"
+                                      FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding Publisher.IsPreviewTabSelected}">
+                        <ItemsControl ItemsSource="{Binding Publisher.PreviewLines}" Margin="0,6">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Height="19">
+                                        <TextBlock Text="{Binding LineNumber}" Width="30" TextAlignment="Right"
+                                                   Margin="0,0,8,0" FontFamily="{DynamicResource MonoFontFamily}"
+                                                   FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <Border Width="{Binding Indent, Converter={x:Static views:IndentToWidthConverter.Instance}}" />
+                                        <ItemsControl ItemsSource="{Binding Segments}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Text}"
+                                                               FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                                                               Classes.key="{Binding IsKey}" Classes.str="{Binding IsString}"
+                                                               Classes.num="{Binding IsNumber}" Classes.lit="{Binding IsLiteral}"
+                                                               Classes.punct="{Binding IsPunctuation}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding Publisher.IsEnvelopeTabSelected}">
+                        <StackPanel Spacing="1">
+                            <Grid ColumnDefinitions="150,*" Height="25" Margin="10,0">
+                                <TextBlock Grid.Column="0" Text="Content-Type" VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Muted}" />
+                                <TextBox Grid.Column="1" Text="{Binding Publisher.ContentType, Mode=TwoWay}"
+                                         BorderThickness="0" Background="Transparent"
+                                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Text}" />
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*" Height="25" Margin="10,0">
+                                <TextBlock Grid.Column="0" Text="Partition Key" VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Muted}" />
+                                <TextBox Grid.Column="1" Text="{Binding Publisher.PartitionKey, Mode=TwoWay}"
+                                         BorderThickness="0" Background="Transparent"
+                                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Text}" />
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*" Height="25" Margin="10,0">
+                                <TextBlock Grid.Column="0" Text="Session ID" VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Muted}" />
+                                <TextBox Grid.Column="1" Text="{Binding Publisher.SessionId, Mode=TwoWay}"
+                                         BorderThickness="0" Background="Transparent"
+                                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Text}" />
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*" Height="25" Margin="10,0">
+                                <TextBlock Grid.Column="0" Text="Correlation ID" VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Muted}" />
+                                <TextBox Grid.Column="1" Text="{Binding Publisher.CorrelationId, Mode=TwoWay}"
+                                         BorderThickness="0" Background="Transparent"
+                                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" Foreground="{DynamicResource Text}" />
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Border Grid.Row="2" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="10,0">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                            <Button Grid.Column="0" Content="Publish" Command="{Binding Publisher.PublishCommand}"
+                                    Height="28" Padding="13,0" Background="Transparent"
+                                    BorderBrush="{DynamicResource Accent}" Foreground="{DynamicResource Accent}"
+                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <Button Content="Burst" Command="{Binding Publisher.BurstCommand}"
+                                        Height="28" Padding="9,0" Background="Transparent"
+                                        BorderBrush="{DynamicResource Line}" Foreground="{DynamicResource Text}"
+                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                                <NumericUpDown Value="{Binding Publisher.BurstCount}" Minimum="1" Increment="1" FormatString="0"
+                                               Width="70" Height="28" Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="3" Text="{Binding Publisher.ValidationText}"
+                                       IsVisible="{Binding Publisher.HasValidationIssue}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="260"
+                                       FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                                       Foreground="{DynamicResource Red}" />
+                            <TextBlock Grid.Column="3" Text="{Binding Publisher.PublishStatus}"
+                                       IsVisible="{Binding !Publisher.HasValidationIssue}"
+                                       VerticalAlignment="Center" TextAlignment="Right"
+                                       FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                                       Foreground="{DynamicResource Muted}" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
         <!-- Status bar. -->
-        <Border Grid.Row="7" Background="{DynamicResource Surf}"
+        <Border Grid.Row="8" Background="{DynamicResource Surf}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="14,0">
             <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
                 <TextBlock Grid.Column="0" FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
@@ -337,9 +585,9 @@
              binding, not a Window - per the mockup-to-Avalonia mapping table's rule for
              modal-shaped surfaces (the same pattern the deep-search overlay will use in
              Stage 5). Spans every row so the scrim covers the whole window. -->
-        <Panel Grid.Row="0" Grid.RowSpan="8" IsVisible="{Binding IsSettingsOpen}"
+        <Panel Grid.Row="0" Grid.RowSpan="9" IsVisible="{Binding IsSettingsOpen}"
                Background="#0A0B12" Opacity="0.58" />
-        <Border Grid.Row="0" Grid.RowSpan="8" IsVisible="{Binding IsSettingsOpen}"
+        <Border Grid.Row="0" Grid.RowSpan="9" IsVisible="{Binding IsSettingsOpen}"
                 Width="440" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center"
                 Background="{DynamicResource Raise}" CornerRadius="8" Padding="20"
                 BoxShadow="0 24 60 0 #80000000">

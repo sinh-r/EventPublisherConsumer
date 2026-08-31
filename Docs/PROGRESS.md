@@ -1099,6 +1099,119 @@ Fixed by using the same naming scheme everywhere in the test data.
 
 ---
 
+### M3 step 9 — the publisher UI (this pass)
+
+The publisher panel is real and wired end to end — toggled from a new "Publish" toolbar
+button (`⌃2`'s target, matching the mockup's own `onTogglePublisher`), not a top tab-strip
+switch. **Correction to this pass's own plan text, found by re-reading the mockup's actual
+markup before building against it**: the plan said "the tab strip needs to actually switch
+between the consumer workspace and the publisher," but the mockup's publisher is a resizable
+*bottom-docked panel* toggled by a toolbar button, never a tab-strip destination — the top tab
+strip in both the mockup and this app is exclusively about connection tabs. Built to what the
+mockup actually shows, not to the plan's paraphrase of it.
+
+**Tree model** (`EventScope.App/Publisher/`): `PublisherNode` (an `ObservableObject` per
+field: `Key`, `Type`, `Generator` — the editable template string — and `Value`, a read-only
+preview of what that template last resolved to) and `PublisherTreeModel`, which owns the tree
+and an always-in-sync `FlattenedRows` projection — the "observable flattened projection" build
+plan §5 calls for, rebuilt on any structural change or any node's `Key`/`Type`/`Generator`
+edit via a `PropertyChanged` subscription taken out on every node as it enters the tree.
+`CollectLeafTemplates()` walks every primitive leaf into a `LeafTemplate` keyed by its
+`JsonPath`, feeding `GenerationPlanner` directly; `ApplyValues` writes a fill's results back
+onto each node's `Value` for display. `FromJson`/`ToJson` convert to and from `JsonNode` — the
+seam schema inference (step 10) will build on, and already exercised by round-trip tests.
+
+**One deliberate deviation from Value being independently editable, as the mockup draws it**:
+the mockup's row has both an editable Value input and a separate Generator input with no
+stated precedence if they disagree. Rather than invent one, Value here is display-only,
+refreshed after every fill; editing happens through Generator alone — a literal string with no
+`{{}}` tokens is just a literal. Documented in `PublisherNode`'s own remarks, not left as a
+silent surprise.
+
+**Generation wiring** (`PublisherViewModel`): `Recompute()` builds a fresh
+`GenerationPlanner.Build` plan from the tree's leaves, fills it via a reused
+`GenerationRunner`, writes values back onto the tree, and renders `PlanDiagnostics` as inline
+text using the build plan's own literal wording — `"Invalid: unresolved {{ref:$.missing}} at
+line 8"` for an unresolved ref, `"Invalid: cycle $.a → $.b → $.a"` for a reported cycle. Edits
+debounce 150 ms before recomputing (the same debounce this codebase already uses for FTS
+search — see `SearchViewModel`), except `Regenerate` and `Publish`, which force it
+synchronously first. `Recompute()` is `public` specifically so tests drive it without racing
+the debounce timer.
+
+**Preview pane**: `PreviewBuilder` pretty-prints the tree's `JsonNode` via
+`JsonSerializer`/`ToJsonString(WriteIndented: true)` and classifies each line with a regex
+(key / string / number / literal / punctuation) rather than hand-rolling a second JSON writer
+that also tracks line numbers — simpler, and not a perf-sensitive path (publisher messages are
+small, interactively edited, nothing like the ingest hot path). Coloured via the same
+declarative `Classes.key`/`Classes.str`/etc. binding pattern already proven safe at 10k msg/s
+for the message grid's `large`/`searchHit` cells (see the M1-remainder row-styling pass) —
+never the imperative alternative that pass found expensive. Envelope tab is a direct,
+editable form (Content-Type, Partition Key, Session ID, Correlation ID) rather than the
+mockup's read-only key/value mirror — there was nowhere else in this app for those fields to
+be edited, so making the tab editable serves a real purpose the mockup's own static dev-state
+screenshot didn't need to show.
+
+**No `IEventSink` exists to publish to until step 10's `KafkaEventSink`.** `PublishAsync`/
+`BurstAsync` take an injected `Func<IEventSink?>` sink provider (the same provider-injection
+pattern as `SearchViewModel`/`SettingsViewModel`), defaulting to "no sink" — `PublishStatus`
+reports "No publish target connected." rather than silently doing nothing. Verified manually
+(below) that this reports correctly rather than crashing, since it's the only path through the
+whole panel this pass can actually exercise for real.
+
+**Scoped down from the mockup on purpose, matching this codebase's established proportionality
+calls (see step 6's search-hit highlighting, step 7's settings form):**
+- **`DataGrid` instead of `TreeDataGrid.Avalonia`** for the tree editor. The mockup's own
+  markup is a flat row list with indent-guide spans and no expand/collapse affordance at all —
+  not a nested/collapsible tree — so `HierarchicalTreeDataGridSource<T>`'s hierarchical mode
+  buys nothing here, and adopting a completely unproven UI dependency's API (this codebase has
+  zero measured experience with `TreeDataGrid.Avalonia`, versus four passes of hard-won
+  `DataGrid` knowledge, including two real virtualization/binding bugs found and fixed) for a
+  visual that's already just a flat `ItemsControl` would be risk with no payoff. Built as an
+  `ItemsControl` with a per-row `Border` indent (`DepthToIndentConverter`, 16px/level per §4.3)
+  instead.
+- **No per-row hover mini-icons** (add-sibling/add-child/duplicate from the mockup). One
+  header "Add field" plus a per-row delete covers the same editing capability with far less
+  interaction-state code; a nested child is added by setting a field's own Type to
+  Object/Array first, which is what Type is for.
+- **No drag-to-resize** for the publisher panel, unlike the detail pane's working
+  `GridSplitter`. The two requirements — collapsing to zero height when closed, and being
+  drag-resizable while open — are in real tension in Avalonia: `GridSplitter` resizes by
+  overwriting its target `RowDefinition.Height` with a fixed pixel value on the first drag,
+  which would silently turn an `Auto` row (needed for the close-to-zero behaviour, since an
+  `IsVisible="False"` child collapses an `Auto` row to nothing) into a row that no longer
+  collapses. Chose reliable open/close over resize-while-open; the panel's height is a fixed
+  380px (§4.3's own default) while open.
+
+**Manually verified against the real running app**, not just tests — driven via Windows UI
+Automation from PowerShell, the working recipe this codebase already established: opened the
+publisher panel, added a field, switched to the Envelope tab and back, clicked Regenerate,
+edited all four envelope text boxes, clicked Publish (no sink configured — confirmed it
+reports rather than crashes), clicked Burst, then closed cleanly. **Caught and fixed a real
+crash this way before it shipped**: the Preview/Envelope tab buttons' `SelectTabCommand` was a
+`RelayCommand<int>`, and Avalonia's XAML `CommandParameter="0"`/`"1"` binds a literal
+`string`, not an `int` — `RelayCommand<T>.CanExecute` throws `ArgumentException` on a
+type-mismatched parameter, which fires the instant the button's `Command` property is set
+during window construction, crashing the app before the window ever appears. Fixed by
+splitting into two parameterless commands (`SelectPreviewTabCommand`/
+`SelectEnvelopeTabCommand`) rather than fighting XAML's string-typed literal parameters. This
+is exactly the class of bug compiled bindings do not catch — the binding *path* was valid, only
+the runtime parameter type was wrong — which is why running the real app mattered here, not
+just a green test suite.
+
+Tests: 178, up from 158 — 20 new, all in `EventScope.App.Tests`, none needing
+`HeadlessFixture` (the tree model and view model use no Avalonia types). `PublisherTreeModelTests`
+×9 (flattening order including nested objects, array-element paths by index rather than key,
+delete, rename raising `Changed`, leaf collection skipping containers, `ApplyValues` writing
+generated values onto nodes, `ToJson`/`FromJson` round-tripping type and generator seeding).
+`PublisherViewModelTests` ×11 (unresolved-ref and cycle diagnostics rendered as the build
+plan's own inline wording, a valid tree having no issue, add/delete updating the bound rows,
+publish sending the generated body to an injected fake sink, publish without a sink reporting
+rather than throwing, publish refusing on a validation issue rather than sending a broken
+message, a 5-message burst producing 5 distinct GUIDs, tab selection flags, and envelope
+fields carrying through to the published message).
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -1113,10 +1226,12 @@ Fixed by using the same naming scheme everywhere in the test data.
   be fully correct rather than just visually adequate most of the time.
 - **M2 is complete** (see above) — day-file rolling, retention/eviction, the FTS indexer,
   tiered search, pinned JSON-field columns, a settings view, and the chaos soak test.
-- **M3, remaining.** The generator engine (token lexer, `GenerationPlanner`,
-  `GenerationRunner` — see above) is done. Still pending: the publisher UI (`JsonNode`-backed
-  tree editor via `TreeDataGrid`, preview pane, tab strip switching), schema inference, and
-  the publish path (burst publish, `KafkaEventSink`, round-trip acceptance test).
+- **M3, remaining.** The generator engine (step 8) and the publisher UI (step 9 — tree editor,
+  generation wiring, coloured preview, envelope tab, publish/burst against an injectable sink
+  provider) are done (see above). Still pending: schema inference from a consumed message, and
+  the publish path's real broker leg (`KafkaEventSink`, round-trip acceptance test) — until
+  that lands, `Publish`/`Burst` correctly report "no publish target connected" rather than
+  doing anything.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the
   capability-binding audit (no `if (broker == …)` in the view layer).
 - **Stage 5 — polish.** Connection manager + per-broker forms, deep-search overlay,

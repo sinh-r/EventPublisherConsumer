@@ -48,11 +48,19 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public SettingsViewModel Settings { get; }
 
+    public PublisherViewModel Publisher { get; } = new();
+
     [ObservableProperty]
     public partial bool IsSettingsOpen { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsPublisherOpen { get; set; }
+
     [RelayCommand]
     private void ToggleSettings() => IsSettingsOpen = !IsSettingsOpen;
+
+    [RelayCommand]
+    private void TogglePublisher() => IsPublisherOpen = !IsPublisherOpen;
 
     public MainWindowViewModel()
     {
