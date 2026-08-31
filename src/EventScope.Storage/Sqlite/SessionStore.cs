@@ -36,12 +36,14 @@ public sealed class SessionStore : IDisposable
     private readonly TimeProvider _time;
     private readonly Lock _gate = new();
     private readonly ConcurrentDictionary<string, SegmentReader> _readersByDay = new();
+    private readonly List<PinnedField> _pinnedFields;
     private bool _disposed;
 
-    public SessionStore(string rootDirectory, TimeProvider? timeProvider = null)
+    public SessionStore(string rootDirectory, TimeProvider? timeProvider = null, IReadOnlyList<PinnedField>? pinnedFields = null)
     {
         _rootDirectory = rootDirectory;
         _time = timeProvider ?? TimeProvider.System;
+        _pinnedFields = pinnedFields is null ? [] : [..pinnedFields];
         CurrentDay = _time.GetUtcNow().ToString("yyyy-MM-dd");
         OpenCurrentDay();
     }
@@ -161,11 +163,37 @@ public sealed class SessionStore : IDisposable
         System.IO.Directory.Delete(dir, recursive: true);
     }
 
+    /// <summary>Adds a pinned JSON-field column, applied to the current day file immediately
+    /// (posted through the live writer's queue — build plan §3.6, an ALTER TABLE must never
+    /// race a second connection to the same file) and remembered so every future day file
+    /// gets it too, applied directly at open. Existing older day files are <i>not</i>
+    /// migrated — the column simply won't exist there. Removing a field from
+    /// configuration (not implemented here) would work the same way: it stops being applied
+    /// to new day files, but this class makes no attempt to drop it from files that already
+    /// have it.</summary>
+    public void AddPinnedField(PinnedField field)
+    {
+        if (!PinnedField.IsValidName(field.Name) || !PinnedField.IsValidJsonPath(field.JsonPath))
+        {
+            throw new ArgumentException($"Invalid pinned field name or JSON path: '{field.Name}' / '{field.JsonPath}'.");
+        }
+
+        lock (_gate)
+        {
+            if (_pinnedFields.Any(f => f.Name == field.Name)) return; // already configured
+            _pinnedFields.Add(field);
+        }
+
+        Writer.Enqueue(new WriteOp.AddPinnedField(field));
+    }
+
+    public IReadOnlyList<PinnedField> PinnedFields => _pinnedFields;
+
     private void OpenCurrentDay()
     {
         Directory = System.IO.Path.Combine(_rootDirectory, CurrentDay);
         System.IO.Directory.CreateDirectory(Directory);
-        Writer = new SqliteBatchWriter(System.IO.Path.Combine(Directory, $"{CurrentDay}.db"), _time);
+        Writer = new SqliteBatchWriter(System.IO.Path.Combine(Directory, $"{CurrentDay}.db"), _time, _pinnedFields);
         SegmentWriter = new SegmentWriter(Directory);
         SegmentReader = new SegmentReader(Directory);
         _readersByDay[CurrentDay] = SegmentReader;

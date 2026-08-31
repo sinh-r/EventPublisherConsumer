@@ -35,12 +35,27 @@ public sealed class RetentionService : IDisposable
 {
     private readonly string _rootDirectory;
     private readonly SessionStore _sessionStore;
-    private readonly long _capBytes;
-    private readonly int _retentionDays;
     private readonly TimeProvider _time;
     private readonly PeriodicTimer _timer;
     private readonly Task _loopTask;
     private readonly CancellationTokenSource _cts = new();
+    private long _capBytes;
+    private int _retentionDays;
+
+    /// <summary>Settable at runtime — the settings view (build plan §5 M2) changes these
+    /// without needing a reconnect; the next 30 s tick (or a manually driven
+    /// <see cref="RunOnce"/>) picks them up.</summary>
+    public long CapBytes
+    {
+        get => _capBytes;
+        set => _capBytes = value > 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
+    }
+
+    public int RetentionDays
+    {
+        get => _retentionDays;
+        set => _retentionDays = value > 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
+    }
 
     public RetentionService(
         string rootDirectory,
@@ -158,8 +173,27 @@ public sealed class RetentionService : IDisposable
     {
         if (!Directory.Exists(_rootDirectory)) return 0;
 
-        return Directory.EnumerateFiles(_rootDirectory, "*", SearchOption.AllDirectories)
-            .Sum(path => new FileInfo(path).Length);
+        long total = 0;
+        foreach (var path in Directory.EnumerateFiles(_rootDirectory, "*", SearchOption.AllDirectories))
+        {
+            // A -wal file (or a segment mid-eviction) can be truncated or deleted by a
+            // concurrent checkpoint or writer between the enumeration above and this stat -
+            // the chaos soak (build plan §6) reproduces this within seconds under real
+            // concurrent ingest. A file that vanished mid-count contributes nothing to the
+            // current total, which is exactly what "no longer exists" means here.
+            try
+            {
+                total += new FileInfo(path).Length;
+            }
+            catch (FileNotFoundException)
+            {
+            }
+            catch (DirectoryNotFoundException)
+            {
+            }
+        }
+
+        return total;
     }
 
     public void Dispose()

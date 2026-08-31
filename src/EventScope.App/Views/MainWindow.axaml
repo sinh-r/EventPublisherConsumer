@@ -45,7 +45,7 @@
         <!-- Connection toolbar. -->
         <Border Grid.Row="1" Background="{DynamicResource Surf}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" VerticalAlignment="Center">
                 <Panel Grid.Column="0" Width="8" Height="8" Margin="0,0,8,0">
                     <Ellipse Fill="{DynamicResource Green}" IsVisible="{Binding Toolbar.IsRunning}" />
                     <Ellipse Fill="{DynamicResource Dim}" IsVisible="{Binding !Toolbar.IsRunning}" />
@@ -84,6 +84,11 @@
                            FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
                            Foreground="{DynamicResource Muted}"
                            Text="{Binding Toolbar.MessagesPerSecond, StringFormat='{}{0:N0} msg/s'}" />
+
+                <Button Grid.Column="6" Content="Settings" Command="{Binding ToggleSettingsCommand}"
+                        Margin="16,0,0,0" Background="Transparent" BorderBrush="{DynamicResource Line}"
+                        Foreground="{DynamicResource Text}" Padding="10,4"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
             </Grid>
         </Border>
 
@@ -268,6 +273,12 @@
                         <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
                                    Foreground="{DynamicResource Muted}"
                                    Text="{Binding Detail.Selected.Partition, StringFormat='partition {0}'}" />
+                        <!-- Pinned fields (build plan §5 M2) - read on demand per selection,
+                             not carried live on the ring; see DetailPaneViewModel's remarks. -->
+                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                   Foreground="{DynamicResource Muted}" TextWrapping="Wrap"
+                                   IsVisible="{Binding Detail.HasPinnedFieldsText}"
+                                   Text="{Binding Detail.PinnedFieldsText}" />
                     </StackPanel>
 
                     <Border Grid.Column="1" Background="{DynamicResource Surf2}" CornerRadius="5"
@@ -320,6 +331,110 @@
                            Foreground="{DynamicResource Muted}"
                            Text="{Binding StatusBar.ByteBudgetUsed, StringFormat='{}{0:N0} bytes'}" />
             </Grid>
+        </Border>
+
+        <!-- Settings overlay (build plan §5 M2). A Panel in the root grid with an IsVisible
+             binding, not a Window - per the mockup-to-Avalonia mapping table's rule for
+             modal-shaped surfaces (the same pattern the deep-search overlay will use in
+             Stage 5). Spans every row so the scrim covers the whole window. -->
+        <Panel Grid.Row="0" Grid.RowSpan="8" IsVisible="{Binding IsSettingsOpen}"
+               Background="#0A0B12" Opacity="0.58" />
+        <Border Grid.Row="0" Grid.RowSpan="8" IsVisible="{Binding IsSettingsOpen}"
+                Width="440" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="{DynamicResource Raise}" CornerRadius="8" Padding="20"
+                BoxShadow="0 24 60 0 #80000000">
+            <ScrollViewer>
+                <StackPanel Spacing="14">
+                    <TextBlock Text="Settings" FontFamily="{DynamicResource SansFontFamily}"
+                               FontSize="14" FontWeight="Medium" Foreground="{DynamicResource Text}" />
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="RETENTION CAP (MB)" FontFamily="{DynamicResource SansFontFamily}"
+                                   FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+                        <NumericUpDown Value="{Binding Settings.RetentionCapMegabytes}"
+                                       Minimum="1" Increment="100" FormatString="0"
+                                       Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="RETENTION DAYS" FontFamily="{DynamicResource SansFontFamily}"
+                                   FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+                        <NumericUpDown Value="{Binding Settings.RetentionDays}"
+                                       Minimum="1" Increment="1" FormatString="0"
+                                       Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="INDEXED PREFIX (BYTES)" FontFamily="{DynamicResource SansFontFamily}"
+                                   FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+                        <NumericUpDown Value="{Binding Settings.IndexedPrefixBytes}"
+                                       Minimum="256" Increment="256" FormatString="0"
+                                       Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}" />
+                        <TextBlock Text="Applies to new connections only (Stop, then Start)."
+                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                                   Foreground="{DynamicResource Dim}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="PINNED FIELDS" FontFamily="{DynamicResource SansFontFamily}"
+                                       FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+
+                            <ItemsControl ItemsSource="{Binding Settings.PinnedFields}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                                                   Foreground="{DynamicResource Text}">
+                                            <TextBlock.Text>
+                                                <MultiBinding StringFormat="{}{0}  →  {1}">
+                                                    <Binding Path="Name" />
+                                                    <Binding Path="JsonPath" />
+                                                </MultiBinding>
+                                            </TextBlock.Text>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="6">
+                                <TextBox Grid.Column="0" Watermark="name" Text="{Binding Settings.NewPinnedFieldName}"
+                                         Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                <TextBox Grid.Column="1" Watermark="$.path" Text="{Binding Settings.NewPinnedFieldPath}"
+                                         Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                         FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                <Button Grid.Column="2" Content="Add" Command="{Binding Settings.AddPinnedFieldCommand}"
+                                        Background="Transparent" BorderBrush="{DynamicResource Accent}"
+                                        Foreground="{DynamicResource Accent}" Padding="10,4"
+                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                            </Grid>
+
+                            <TextBlock Text="{Binding Settings.ValidationError}"
+                                       IsVisible="{Binding Settings.HasValidationError}"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="11.5"
+                                       Foreground="{DynamicResource Red}" TextWrapping="Wrap" />
+
+                            <TextBlock Text="A pinned field extracts a JSON path from the indexed prefix - values past that cutoff resolve to nothing. Applies to the running connection immediately; existing rows are unaffected until re-read."
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                                       Foreground="{DynamicResource Dim}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <TextBlock Text="{Binding Settings.SavedMessage}" VerticalAlignment="Center"
+                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="12"
+                                   Foreground="{DynamicResource Green}" />
+                        <Button Content="Save" Command="{Binding Settings.SaveCommand}"
+                                Background="Transparent" BorderBrush="{DynamicResource Accent}"
+                                Foreground="{DynamicResource Accent}" Padding="12,4"
+                                FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                        <Button Content="Close" Command="{Binding ToggleSettingsCommand}"
+                                Background="Transparent" BorderBrush="{DynamicResource Line}"
+                                Foreground="{DynamicResource Text}" Padding="12,4"
+                                FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
         </Border>
     </Grid>
 </Window>

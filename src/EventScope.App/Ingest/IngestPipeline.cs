@@ -34,6 +34,8 @@ public sealed class IngestPipeline : IAsyncDisposable
     private readonly InMemoryPayloadStore _hotStore;
     private readonly CancellationTokenSource _cts = new();
 
+    private readonly int _indexedPrefixBytes;
+
     private long _sequence;
     private Task? _sourceTask;
     private Task? _drainTask;
@@ -44,11 +46,13 @@ public sealed class IngestPipeline : IAsyncDisposable
         IUiTicker ticker,
         SessionStore sessionStore,
         long byteBudgetLimit = 256 * 1024 * 1024,
-        int hotPayloadCapacity = 4096)
+        int hotPayloadCapacity = 4096,
+        int indexedPrefixBytes = 2048)
     {
         _source = source;
         _rows = rows;
         _sessionStore = sessionStore;
+        _indexedPrefixBytes = indexedPrefixBytes;
         _byteBudget = new ByteBudget(byteBudgetLimit);
         _channel = Channel.CreateBounded<RawMessage>(new BoundedChannelOptions(4096)
         {
@@ -141,7 +145,7 @@ public sealed class IngestPipeline : IAsyncDisposable
             ? "payload not previewed"
             : BuildPreview(message.Body);
 
-        var bodyHead = BuildBodyHead(message.Body);
+        var bodyHead = BuildBodyHead(message.Body, _indexedPrefixBytes);
 
         var header = new MessageHeader(
             sequence: sequence,
@@ -196,11 +200,14 @@ public sealed class IngestPipeline : IAsyncDisposable
         return truncated ? string.Concat(buffer, "…") : new string(buffer);
     }
 
-    /// <summary>First 2 KB of the body, captured at ingest for M2's FTS indexer — capturing
-    /// it now means no backfill pass is needed once the indexer exists.</summary>
-    private static string? BuildBodyHead(byte[] body)
+    /// <summary>The first <paramref name="capBytes"/> of the body (2 KB by default, settings
+    /// view's "indexed prefix" per the build plan), captured at ingest for the FTS indexer —
+    /// capturing it now means no backfill pass is ever needed. Changing this setting only
+    /// affects newly-ingested rows; it does not rewrite <c>body_head</c> for rows already on
+    /// disk (doing so would violate the FTS external-content contract in §3.4 — that column
+    /// must never be updated after indexing).</summary>
+    private static string? BuildBodyHead(byte[] body, int capBytes)
     {
-        const int capBytes = 2048;
         if (body.Length == 0) return null;
         return Encoding.UTF8.GetString(body, 0, Math.Min(body.Length, capBytes));
     }

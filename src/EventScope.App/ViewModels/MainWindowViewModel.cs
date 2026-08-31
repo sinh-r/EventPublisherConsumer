@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Collections;
 using EventScope.App.Ingest;
+using EventScope.App.Settings;
 using EventScope.Brokers.Kafka;
 using EventScope.Storage.Retention;
 using EventScope.Storage.Search;
@@ -20,11 +21,7 @@ namespace EventScope.App.ViewModels;
 /// </summary>
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
-    // Defaults until Stage 7's settings view exists to make these user-configurable, per
-    // the build plan's M2 task list.
-    private const long DefaultRetentionCapBytes = 2L * 1024 * 1024 * 1024;
-    private const int DefaultRetentionDays = 14;
-
+    private readonly AppSettings _settings = AppSettings.Load();
     private readonly DispatcherTimer _statsTimer;
     private IngestPipeline? _pipeline;
     private SessionStore? _sessionStore;
@@ -49,9 +46,18 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public SearchViewModel Search { get; }
 
+    public SettingsViewModel Settings { get; }
+
+    [ObservableProperty]
+    public partial bool IsSettingsOpen { get; set; }
+
+    [RelayCommand]
+    private void ToggleSettings() => IsSettingsOpen = !IsSettingsOpen;
+
     public MainWindowViewModel()
     {
         Search = new SearchViewModel(Rows, () => _sessionStore is null ? null : new FtsSearchService(_sessionStore));
+        Settings = new SettingsViewModel(_settings, () => _sessionStore, () => _retentionService);
         _statsTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(250),
@@ -80,9 +86,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         if (_pipeline is not null) return;
 
-        _sessionStore ??= new SessionStore(DefaultSessionRootDirectory());
+        _sessionStore ??= new SessionStore(
+            DefaultSessionRootDirectory(),
+            pinnedFields: _settings.PinnedFields.Select(f => new PinnedField(f.Name, f.JsonPath)).ToList());
         _retentionService ??= new RetentionService(
-            DefaultSessionRootDirectory(), _sessionStore, DefaultRetentionCapBytes, DefaultRetentionDays);
+            DefaultSessionRootDirectory(), _sessionStore, _settings.RetentionCapBytes, _settings.RetentionDays);
 
         // EventSourceFactory reads EVENTSCOPE_KAFKA_BOOTSTRAP/TOPIC to pick a real
         // KafkaEventSource instead of the default FakeEventSource — see its remarks. Nothing
@@ -104,7 +112,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             source,
             Rows,
             new DispatcherTimerTicker(),
-            _sessionStore);
+            _sessionStore,
+            indexedPrefixBytes: _settings.IndexedPrefixBytes);
         _pipeline.Start();
 
         Toolbar.IsRunning = true;
@@ -140,7 +149,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             Rows.Pin();
         }
 
-        await Detail.LoadAsync(vm, _pipeline).ConfigureAwait(true);
+        await Detail.LoadAsync(vm, _pipeline, _sessionStore).ConfigureAwait(true);
         RefreshStats();
     }
 

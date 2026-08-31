@@ -41,4 +41,11 @@ public abstract record WriteOp
     /// write connection (build plan §3.4's WAL-starvation note). Posted by
     /// <c>EventScope.Storage.Retention.RetentionService</c> when idle, never by ingest.</summary>
     public sealed record Checkpoint : WriteOp;
+
+    /// <summary>Applies a newly-added pinned JSON-field column to the live day file, on the
+    /// writer's own thread and connection — a schema-altering <c>ALTER TABLE</c> is exactly
+    /// the kind of operation that must never race a second connection touching the same
+    /// file. Posted by <c>SessionStore.AddPinnedField</c> when settings change mid-session;
+    /// new day files apply every configured field directly at open instead of via this op.</summary>
+    public sealed record AddPinnedField(PinnedField Field) : WriteOp;
 }

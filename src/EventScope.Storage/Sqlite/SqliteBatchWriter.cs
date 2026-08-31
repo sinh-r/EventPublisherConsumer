@@ -47,13 +47,15 @@ public sealed class SqliteBatchWriter : IDisposable
     /// <see cref="PendingCount"/>'s equivalent staleness already is.</summary>
     public long IndexLag => Interlocked.Read(ref _cachedIndexLag);
 
-    public SqliteBatchWriter(string databasePath, TimeProvider? timeProvider = null)
+    public SqliteBatchWriter(
+        string databasePath, TimeProvider? timeProvider = null, IReadOnlyList<PinnedField>? pinnedFields = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         _connection = new SqliteConnection($"Data Source={databasePath}");
         _connection.Open();
         SqliteSchema.Apply(_connection);
+        PinnedFieldsSchema.Apply(_connection, pinnedFields ?? []);
         SqliteCapabilityProbe.Verify(_connection);
         _subjects = new SubjectInterner(_connection);
 
@@ -111,6 +113,9 @@ public sealed class SqliteBatchWriter : IDisposable
                             break;
                         case WriteOp.Checkpoint:
                             checkpointRequested = true;
+                            break;
+                        case WriteOp.AddPinnedField addPinnedField:
+                            PinnedFieldsSchema.Apply(_connection, [addPinnedField.Field]);
                             break;
                         case FlushBarrier barrier:
                             barriers.Add(barrier.Completion);

@@ -924,6 +924,98 @@ match beyond the 2 KB body_head cap, progress reporting, and cancellation).
 
 ---
 
+### M2 step 7 — pinned fields, settings, and the chaos soak (this pass) — closes M2
+
+**Pinned JSON fields.** `PinnedField` (`EventScope.Storage/Sqlite/`) validates a field name
+(letters/digits/underscore, must start with a letter or underscore) and a `$.a.b[0]`-shaped
+JSON path via `[GeneratedRegex]`. `PinnedFieldsSchema.Apply` idempotently adds a
+`GENERATED ALWAYS AS (json_extract(body, path)) VIRTUAL` column plus an index for each
+configured field, defense-in-depth re-validating both name and path even though the UI
+already did. `SessionStore` now carries the configured field list into every day file it
+opens (new and existing), and `SqliteBatchWriter` grew a `WriteOp.AddPinnedField` case so a
+field added mid-session goes through the same single-writer queue as every other mutation
+(build plan §3.6 collision #3) rather than a second connection touching the live file.
+`DetailPaneViewModel` resolves pinned columns for the selected row by `(segment_id, offset)`
+— `MessageRowViewModel` carries no SQLite row id — via a short-lived read-only connection,
+best-effort (a missing/renamed column is swallowed, not surfaced as an error).
+
+**Settings view.** `AppSettings` (`EventScope.App/Settings/`) is plain JSON under
+`%LOCALAPPDATA%\EventScope\settings.json` — deliberately not SQLite, since this is small,
+infrequently-changed, human-editable configuration, not the data the app's own storage model
+exists for. `Load` falls back to defaults on a missing or corrupt file rather than throwing,
+since a broken settings file must never block startup. `SettingsViewModel` applies retention
+cap and retention days **live** to a running `RetentionService` (both are now settable
+properties, not `readonly` fields — the one code change Step 4 left for this step) on Save;
+a newly added pinned field applies live to a running `SessionStore` the same way. The
+indexed-prefix byte count is the deliberate exception: it only takes effect on the next
+`IngestPipeline` construction, since threading a live value into the ingest hot path for
+something this rarely changed isn't worth the complexity — documented as such in the view
+model's own remarks rather than left implicit. Wired into `MainWindow.axaml` as a scrim +
+form overlay (a toolbar button toggles `MainWindowViewModel.IsSettingsOpen`), not a separate
+window — consistent with the app having no window-management story yet.
+
+**The chaos soak (`EventScope.Acceptance.Tests/ChaosSoakTests.cs`)**, gated behind
+`EVENTSCOPE_SOAK=1` like the existing soak-gated acceptance tests, and living in the same
+Avalonia-free project for the same reason (see that project's own `.csproj` remarks). Drives
+a real `FakeEventSource` at 10k msg/s for 60 real seconds through a real `IngestPipeline` /
+`SessionStore`, alongside a `RetentionService` with a 64 MB cap (small enough to force real
+segment eviction against that data volume) and an `FtsSearchService` query issued every
+200 ms. Midway through the run it advances a second, independent `SettableTimeProvider` (the
+day clock, separate from `FakeEventSource`'s own real-time pacing clock) across a midnight
+boundary to force a real rollover mid-flight, exactly as the plan specifies ("day rollover
+forced by FakeTimeProvider") without waiting a real day for one to happen naturally. After
+the run: asserts zero `SqliteException` with `SQLITE_BUSY`, `integrity-check` passes on every
+remaining day file, no `-wal` file exceeds the 64 MB `journal_size_limit`, and the on-disk
+row count across remaining files is a nonzero, non-inflated fraction of what was actually
+handed to the ingest channel (tracked via a counting `IEventSource` wrapper, not
+`MessageRowsView.TotalAppended` — the grid's own ticker is never driven in this test, so that
+counter would just read zero). A strict "emitted − evicted = remaining" equality was
+considered and rejected: at this cap and data volume a whole day file can legitimately be
+evicted-and-dropped entirely mid-run (already covered in isolation by
+`RetentionServiceTests`), which would make an exact count assertion flaky on eviction timing
+rather than actually more correct.
+
+**The chaos soak found a real bug on its first run — the reason this test belongs in the
+plan at all.** `RetentionService.TotalBytes()` did
+`Directory.EnumerateFiles(...).Sum(path => new FileInfo(path).Length)`. Under real concurrent
+load this is a TOCTOU race: a `-wal` file listed by `EnumerateFiles` can be truncated or
+deleted by SQLite's own checkpoint on the writer thread before `FileInfo(path).Length` reads
+it, throwing `FileNotFoundException` and killing the retention loop. First run reproduced it
+in under 34 seconds (`Could not find file '...\2026-06-01.db-wal'`, thrown from
+`RetentionService.EnforceCap`). Fixed by summing file-by-file with a try/catch around each
+stat, treating a file that vanished between enumeration and stat as contributing 0 bytes
+(it's gone; it can't be counted). No unit test in `RetentionServiceTests` (single-threaded,
+deterministic) could have found this — it needed real concurrent I/O, which is exactly what
+Steps 4–6's individual unit tests, by design, don't exercise together. Re-ran clean at 65s
+after the fix: zero `SQLITE_BUSY`, all integrity-checks passed, `-wal` stayed bounded.
+
+**Manually verified:** ran the 65-second soak locally end to end (`EVENTSCOPE_SOAK=1`)
+against a real temp directory, both before the fix (reproduced the crash) and after (clean
+pass) — not just re-run under CI-shaped assumptions.
+
+Tests: 129, up from 104 — 25 new. `PinnedFieldsTests` ×7 in `EventScope.Storage.Tests`
+(name/path validation, column generation and query, a null-JSON-path row resolving to null
+rather than throwing, adding a field mid-session via the batch writer's queue).
+`AppSettingsTests` ×3 and `SettingsViewModelTests` ×7 in `EventScope.App.Tests` (JSON
+round-trip, corrupt-file fallback, megabyte/byte conversion, live push to a running
+`RetentionService`, pinned-field validation including duplicate rejection, working before any
+session is running). `ChaosSoakTests` ×1 in `EventScope.Acceptance.Tests`, skipped by default
+(`EVENTSCOPE_SOAK` unset) — 128 tests run in the default suite; the soak run itself was
+executed manually as described above, not left to a CI machine that doesn't have 65 spare
+seconds per run.
+
+**A recurring correction, not a new one:** `SettableTimeProvider` (`EventScope.Storage.Tests`)
+is `internal` to its own assembly, so `ChaosSoakTests` needed its own copy rather than a
+cross-project reference — duplicated intentionally (see that file's own remarks) rather than
+made `public` and exported from a test assembly for one consumer.
+
+**M2 is closed.** Day-file rolling and retention (step 4), the FTS indexer (step 5), tiered
+search and its UI (step 6), and pinned fields, settings, and the chaos soak (step 7) are all
+done, tested, and — per this pass's own protocol — each committed with this file updated
+alongside it.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -936,9 +1028,8 @@ match beyond the 2 KB body_head cap, progress reporting, and cancellation).
   heap-growth regression (see above and `RowStateClassSync.cs`). A declarative binding
   approach is untried and may be cheaper — worth a look before M2's UI work if this needs to
   be fully correct rather than just visually adequate most of the time.
-- **M2, remaining.** Day-file rolling, retention/eviction, the FTS indexer, and tiered search
-  (instant/FTS/deep-scan) are done (see above). Still pending: pinned JSON-field columns, a
-  settings view, and the chaos soak test.
+- **M2 is complete** (see above) — day-file rolling, retention/eviction, the FTS indexer,
+  tiered search, pinned JSON-field columns, a settings view, and the chaos soak test.
 - **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for
   cycle detection), JSON tree editor, preview pane, schema inference, burst publish.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the
