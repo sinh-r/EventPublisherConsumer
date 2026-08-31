@@ -14,6 +14,19 @@ public interface IEventSource : IAsyncDisposable
     SourceCapabilities Capabilities { get; }
 
     /// <summary>
+    /// A short, broker-and-endpoint-neutral label for display ("Kafka", "Service Bus",
+    /// "SQS", "Fake source") — lets the UI show what's connected without testing the
+    /// concrete type (build plan §5 M4: "no <c>if (broker == …)</c> anywhere in the view
+    /// layer").
+    /// </summary>
+    string DisplayName { get; }
+
+    /// <summary>Raised for a non-fatal client error the source wants surfaced without
+    /// breaking its consume loop (e.g. a transient broker error). Broker-neutral so the view
+    /// layer can subscribe without knowing which concrete source it's watching.</summary>
+    event Action<SourceError>? ErrorOccurred;
+
+    /// <summary>
     /// Starts consuming and writing to <paramref name="destination"/> until
     /// <paramref name="cancellationToken"/> fires. The source is responsible
     /// for respecting the channel's back-pressure (a full/blocked writer

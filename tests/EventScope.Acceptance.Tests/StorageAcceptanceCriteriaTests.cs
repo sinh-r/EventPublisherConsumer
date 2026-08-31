@@ -206,6 +206,10 @@ public sealed class StorageAcceptanceCriteriaTests
             SupportsOffsetCommit = true,
         };
 
+        public string DisplayName => "Burst test source";
+
+        public event Action<SourceError>? ErrorOccurred { add { } remove { } }
+
         public async Task RunAsync(ChannelWriter<RawMessage> destination, CancellationToken cancellationToken)
         {
             var random = new Random(seed);

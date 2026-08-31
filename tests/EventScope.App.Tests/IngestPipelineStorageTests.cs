@@ -139,6 +139,10 @@ public sealed class IngestPipelineStorageTests : IDisposable
             SupportsOffsetCommit = true,
         };
 
+        public string DisplayName => "Finite test source";
+
+        public event Action<SourceError>? ErrorOccurred { add { } remove { } }
+
         public async Task RunAsync(ChannelWriter<RawMessage> destination, CancellationToken cancellationToken)
         {
             var random = new Random(seed);

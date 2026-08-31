@@ -47,6 +47,13 @@ public sealed class FakeEventSource : IEventSource
         SupportsOffsetCommit = true,
     };
 
+    public string DisplayName => "Fake source";
+
+    /// <summary>Never raised — a synthetic source has no client errors to surface. Required
+    /// by <see cref="IEventSource"/> so the view layer can subscribe unconditionally without
+    /// testing which concrete source it's watching.</summary>
+    public event Action<SourceError>? ErrorOccurred { add { } remove { } }
+
     public async Task RunAsync(ChannelWriter<RawMessage> destination, CancellationToken cancellationToken)
     {
         // Batch flushes ~20/s so PeriodicTimer overhead stays well under the per-message

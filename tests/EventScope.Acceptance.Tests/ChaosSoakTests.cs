@@ -166,6 +166,14 @@ public sealed class ChaosSoakTests
 
         public SourceCapabilities Capabilities => inner.Capabilities;
 
+        public string DisplayName => inner.DisplayName;
+
+        public event Action<SourceError>? ErrorOccurred
+        {
+            add => inner.ErrorOccurred += value;
+            remove => inner.ErrorOccurred -= value;
+        }
+
         public Task RunAsync(ChannelWriter<RawMessage> destination, CancellationToken cancellationToken) =>
             inner.RunAsync(new CountingWriter(destination, this), cancellationToken);
 

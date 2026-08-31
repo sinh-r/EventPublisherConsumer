@@ -1,6 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
 using Confluent.Kafka;
+using EventScope.Core.Abstractions;
 using EventScope.Core.Models;
 using Xunit;
 
@@ -306,7 +307,7 @@ public sealed class KafkaEventSourceTests
             new KafkaSourceOptions { BootstrapServers = "test:9092", Topics = ["orders"] },
             _ => fake);
 
-        KafkaSourceError? observed = null;
+        SourceError? observed = null;
         source.ErrorOccurred += e => observed = e;
 
         var message = await RunOneMessageAsync(source, Ct);

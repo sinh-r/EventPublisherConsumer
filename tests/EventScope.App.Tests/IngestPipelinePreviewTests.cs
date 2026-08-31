@@ -82,6 +82,10 @@ public sealed class IngestPipelinePreviewTests : IDisposable
             SupportsOffsetCommit = true,
         };
 
+        public string DisplayName => "Scripted test source";
+
+        public event Action<SourceError>? ErrorOccurred { add { } remove { } }
+
         public async Task RunAsync(ChannelWriter<RawMessage> destination, CancellationToken cancellationToken)
         {
             try

@@ -45,14 +45,16 @@ public sealed class KafkaEventSource : IEventSource
         _groupId = $"{options.GroupIdPrefix}-{Guid.NewGuid():N}";
 
         _consumerFactory = consumerFactory ?? (config => new ConsumerBuilder<byte[], byte[]>(config)
-            .SetErrorHandler((_, error) => ErrorOccurred?.Invoke(new KafkaSourceError(error.Reason, error)))
+            .SetErrorHandler((_, error) => ErrorOccurred?.Invoke(new SourceError(error.Reason, error.IsFatal)))
             .Build());
     }
+
+    public string DisplayName => "Kafka";
 
     /// <summary>Raised for a non-fatal client error (from the consumer's own error handler,
     /// or a <see cref="ConsumeException"/> whose <see cref="Error.IsFatal"/> is false) — the
     /// loop keeps running afterward. The App wires this into the toolbar's status label.</summary>
-    public event Action<KafkaSourceError>? ErrorOccurred;
+    public event Action<SourceError>? ErrorOccurred;
 
     public SourceCapabilities Capabilities { get; } = new()
     {
@@ -98,7 +100,7 @@ public sealed class KafkaEventSource : IEventSource
                 }
                 catch (ConsumeException ex) when (!ex.Error.IsFatal)
                 {
-                    ErrorOccurred?.Invoke(new KafkaSourceError(ex.Error.Reason, ex.Error));
+                    ErrorOccurred?.Invoke(new SourceError(ex.Error.Reason, IsFatal: false, ex));
                     continue;
                 }
 

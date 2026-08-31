@@ -5,7 +5,6 @@ using EventScope.App.Collections;
 using EventScope.App.Ingest;
 using EventScope.App.Publisher;
 using EventScope.App.Settings;
-using EventScope.Brokers.Kafka;
 using EventScope.Core.Abstractions;
 using EventScope.Storage.Retention;
 using EventScope.Storage.Search;
@@ -135,13 +134,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Toolbar.CanPeekNonDestructively = source.Capabilities.CanPeekNonDestructively;
         Toolbar.SupportsPartitions = source.Capabilities.SupportsPartitions;
 
-        if (source is KafkaEventSource kafka)
-        {
-            // Fires from the dedicated Kafka consume thread (see KafkaEventSource's remarks),
-            // never the UI thread — must marshal before touching a bound view-model property.
-            kafka.ErrorOccurred += error =>
-                Dispatcher.UIThread.Post(() => Toolbar.StatusLabel = $"Kafka error: {error.Message}");
-        }
+        // Every IEventSource — regardless of concrete broker — raises errors through the
+        // same broker-neutral event, so this subscription needs no type test (build plan §5
+        // M4: "no if (broker == …) anywhere in the view layer"). A broker's consume loop may
+        // fire from its own dedicated or pooled thread, never guaranteed to be the UI thread,
+        // so every property touch below is marshalled.
+        source.ErrorOccurred += error =>
+            Dispatcher.UIThread.Post(() => Toolbar.StatusLabel = $"{source.DisplayName} error: {error.Message}");
 
         _pipeline = new IngestPipeline(
             source,
@@ -152,7 +151,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _pipeline.Start();
 
         Toolbar.IsRunning = true;
-        Toolbar.StatusLabel = source is KafkaEventSource ? "Streaming (Kafka)" : "Streaming";
+        Toolbar.StatusLabel = $"Streaming ({source.DisplayName})";
         _lastStatsTotal = Rows.TotalAppended;
         _lastStatsTimeUtc = DateTime.UtcNow;
     }
