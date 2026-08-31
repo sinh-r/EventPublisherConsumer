@@ -1,2 +1,2 @@
 duration_seconds,sample_count,p50_ms,p99_ms,max_ms,over_100ms_count
-60,2635,20.762,38.702,104.747,1
+60,2630,20.241,39.324,117.120,2

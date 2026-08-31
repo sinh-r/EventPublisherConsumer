@@ -614,12 +614,79 @@ correctness, bounded capacity, and the live-segment case; 1 new in
 
 ---
 
+### M1 remainder, step 3 — row-state styling: a real bug fixed, a bigger regression caught and reverted (this pass)
+
+**The bug, confirmed real by reading the code.** `MainWindow.axaml.cs`'s `OnLoadingRow` set a
+realized `DataGridRow`'s `large`/`evicted`/`deadLettered` classes once, at realization time
+only. But `MessageRowsView.RecomputeFollowWindow`'s follow-mode steady state repopulates an
+already-realized row's same `MessageRowViewModel` instance in place (by design — that's how
+it stays cheap at 10k msg/s), raising no collection notification at all. `LoadingRow` never
+fires again, so a row styled `large` kept that styling once repopulated with an ordinary
+message. Also confirmed missing: `MainWindow.axaml` had no `.large` or `.deadLettered`
+selectors at all — §4.4's amber Size cell and 2px red dead-letter edge were unimplemented,
+not just stale.
+
+**First fix attempt: a `PropertyChanged` subscription per realized row, extracted into a new
+`RowStateClassSync` (`src/EventScope.App/Views/`) so it could be tested against a minimal
+`DataGrid` instead of the full `MainWindow`** — constructing a real `MainWindow` inside
+`EventScope.App.Tests` reproducibly hangs the assembly, confirmed by isolating it to a bare
+construct/show/close with no row content involved at all. This is a new, more specific
+instance of the Avalonia-headless threading family already tracked in Blocked item 2; the
+regression tests originally written for this fix are consequently the reason two of the new
+tests below don't exist anymore — see the next paragraph.
+
+**Measurement caught a serious regression before it shipped.** Even after filtering the
+subscription's handler down to only the three relevant properties (`Populate` sets ~12 per
+call), a 60s acceptance measurement showed **~290–340 MB heap growth — worse than step 1's
+starting point — plus a reintroduced shutdown delay**. Bisected by toggling only the
+subscription on/off with everything else identical: ~57–94 MB either side of it, confirming
+the subscription itself as the cause, not noise. The cost is Avalonia's per-`Classes.Set`
+style re-evaluation under an imperative handler, not invocation count.
+
+**Reverted rather than shipped.** The staleness this fixes is cosmetic and narrow (only
+visible in the gap between a row's flags changing and it next reloading); a 4–6x regression
+on the heap-growth criterion this pass had just spent real effort fixing is not a trade worth
+making. `RowStateClassSync` now does only the original one-time apply — functionally
+unchanged from the inline code it was extracted from, kept only because the extraction itself
+is a harmless small testability win. Full account, numbers, and a cheaper idea for later (a
+declarative `Classes.large="{Binding IsLarge}"` binding — proven safe on the SIZE column's
+own cell below, but not directly applicable to `DataGridRow` itself since it isn't
+user-templated) are in `RowStateClassSync.cs`'s remarks and
+`tests/EventScope.Bench/baselines/acceptance/README.md`.
+
+**What did ship, and is safe:**
+- The missing §4.4 selectors — `.large` (amber Size cell via a `DataGridTemplateColumn` with
+  `Classes.large="{Binding IsLarge}"` on its cell's `TextBlock` — Avalonia's native binding
+  path, not the imperative handler that regressed) and `.deadLettered` (2px `Red` left border,
+  with the spec's "always reserved" transparent 2px gutter now the `DataGridRow` baseline so
+  the marking causes no reflow). Also fixed in passing: the SIZE column had never actually
+  been right-aligned per §4.3 despite the spec calling for it — the template-column rewrite
+  gave that for free.
+- The one-time apply-at-load behavior (unchanged from before this pass).
+
+**Re-measured to close out the M1 remainder — four 60s runs total across steps 1–3, all with
+the final code:** managed heap Δ 55, 62, 57, 66 MB; frame time 1–2 samples of ~2,650 over
+100 ms each run. Both remain marginal against their 50 MB / zero-over-budget targets, not a
+clean pass, and that is the honest final state of M1's two open defects — down from a hard
+fail (~470–500 MB, and a shutdown that never completed on its own) to a small, stable margin.
+
+Tests: 69, unchanged — the row-styling regression tests were written, then deleted along with
+the code they tested once the measurement showed the fix itself was the worse defect.
+
+---
+
 ## Pending — in build-plan order
 
-- **Heap growth, remaining ~60–75 MB — optional further work.** Down from ~470–500 MB (see
+- **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
   above) but still over the 50 MB budget. Not pursued further this pass since the return was
   already large; a longer (5–10 minute) `dotnet-counters` run would distinguish "GC hasn't
   caught up in 60s" from a smaller remaining leak, if a clean pass is needed later.
+- **Row-state class staleness — cosmetic, known, not fixed.** A row's `large`/`evicted`/
+  `deadLettered` grid styling can go stale after a follow-mode steady-state repopulate. A
+  `PropertyChanged`-subscription fix was built and reverted after measurement showed a 4–6x
+  heap-growth regression (see above and `RowStateClassSync.cs`). A declarative binding
+  approach is untried and may be cheaper — worth a look before M2's UI work if this needs to
+  be fully correct rather than just visually adequate most of the time.
 - **M2 — storage discipline and search.** Day-file rolling, retention/eviction, FTS5
   tiered search (`body_fts` / `ident_fts`), pinned JSON-field columns, settings view.
 - **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for

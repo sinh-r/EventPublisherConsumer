@@ -8,6 +8,8 @@ public partial class MainWindow : Window
 {
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext!;
 
+    private readonly RowStateClassSync _rowStateClassSync = new();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -17,12 +19,8 @@ public partial class MainWindow : Window
 
     private void OnLoadingRow(object? sender, DataGridRowEventArgs e)
     {
-        if (e.Row.DataContext is not MessageRowViewModel vm) return;
-
         e.Row.Classes.Set("odd", e.Row.Index % 2 == 1);
-        e.Row.Classes.Set("large", vm.IsLarge);
-        e.Row.Classes.Set("evicted", vm.IsEvicted);
-        e.Row.Classes.Set("deadLettered", vm.IsDeadLettered);
+        _rowStateClassSync.OnLoadingRow(e.Row, e.Row.DataContext as MessageRowViewModel);
     }
 
     private void OnUnloadingRow(object? sender, DataGridRowEventArgs e) =>

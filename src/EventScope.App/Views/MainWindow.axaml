@@ -131,7 +131,21 @@
                                      Binding="{Binding Time, StringFormat='{}{0:HH:mm:ss.fff}'}" />
                 <DataGridTextColumn Header="SUBJECT" Width="180" Binding="{Binding Subject}" />
                 <DataGridTextColumn Header="CORRELATION ID" Width="260" Binding="{Binding CorrelationId}" />
-                <DataGridTextColumn Header="SIZE" Width="70" Binding="{Binding Size}" />
+                <!-- §4.4: the Size cell turns Amber for a large (>64 KB) row. A template
+                     column (rather than DataGridTextColumn) so the cell's own TextBlock can
+                     carry a bound Classes.large — direct element-level class binding is the
+                     supported Avalonia mechanism; DataGridTextColumn has no per-cell
+                     conditional-style hook. Also right-aligned per §4.3, which the plain
+                     DataGridTextColumn version of this column never was. -->
+                <DataGridTemplateColumn Header="SIZE" Width="70">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Size}" Classes.large="{Binding IsLarge}"
+                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Margin="6,0" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <!-- Spec width is 48 (Docs/eventscope-build-plan.md §4.3), but Avalonia's
                      DataGridColumnHeader chrome clips a 4-char uppercase header below ~64px
                      regardless of Padding — measured, not guessed. 70 matches SIZE, the
@@ -152,6 +166,11 @@
                 <Style Selector="DataGridRow">
                     <Setter Property="FontFamily" Value="{DynamicResource MonoFontFamily}" />
                     <Setter Property="FontSize" Value="12.5" />
+                    <!-- §4.4: "border-left: 2px solid transparent - the gutter is always
+                         reserved so dead-letter marking causes no reflow." Transparent
+                         baseline here, overridden to Red only by .deadLettered below. -->
+                    <Setter Property="BorderThickness" Value="2,0,0,0" />
+                    <Setter Property="BorderBrush" Value="Transparent" />
                 </Style>
                 <Style Selector="DataGridRow.odd">
                     <Setter Property="Background" Value="{DynamicResource Line2}" />
@@ -165,8 +184,17 @@
                 <Style Selector="DataGridRow.evicted">
                     <Setter Property="Opacity" Value="0.55" />
                 </Style>
+                <Style Selector="DataGridRow.deadLettered">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Red}" />
+                </Style>
                 <Style Selector="DataGridCell">
                     <Setter Property="Foreground" Value="{DynamicResource Text}" />
+                </Style>
+                <!-- Scoped to this DataGrid's own cell templates (see the SIZE column above) -
+                     every TextBlock.large in this tree is that one cell, so an unqualified
+                     TextBlock selector is safe here without further scoping. -->
+                <Style Selector="TextBlock.large">
+                    <Setter Property="Foreground" Value="{DynamicResource Amber}" />
                 </Style>
             </DataGrid.Styles>
         </DataGrid>

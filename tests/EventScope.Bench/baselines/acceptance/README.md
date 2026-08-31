@@ -8,8 +8,8 @@ measurement was 2026-08-30; the heap-growth/shutdown investigation below is 2026
 
 | Criterion | Result | Source |
 |---|---|---|
-| 10,000 msg/s for 60s, no frame over 100 ms | **Marginal, unchanged — 1 of 2,635 samples over budget** (p50 20.8 ms, p99 38.7 ms, max 104.7 ms) | `gui-frame-time.csv` |
-| Heap growth under 50 MB across that run | **Marginal, was a hard fail — ~62–76 MB growth now, down from ~470–500 MB** | `gui-heap-growth.csv`, see below |
+| 10,000 msg/s for 60s, no frame over 100 ms | **Marginal, unchanged — 1–2 of ~2,650 samples over budget** (p50 ~20 ms, p99 ~39 ms, max 102–125 ms across repeated runs) | `gui-frame-time.csv` |
+| Heap growth under 50 MB across that run | **Marginal, was a hard fail — ~57–94 MB growth now, down from ~470–500 MB** | `gui-heap-growth.csv`, see below |
 | 50,000-row scroll under 16 ms/frame | **Pass** (p50 3.5–3.6 ms, p99 4.7–8.1 ms, max 4.7–10.2 ms across repeated runs) | `scroll-frame-time.csv` |
 | Row selection renders body under 100 ms | **Pass, comfortably** (p50 0.5–1.8 ms, max 7.6–41.3 ms depending on run) | `cold-segment-read-latency.csv` |
 | Zero messages lost from disk under saturation | **Pass** — 20,000/20,000 messages landed on disk against a deliberately starved 16 KB byte budget | `saturation-zero-loss.csv` |
@@ -60,13 +60,32 @@ Result, three independent counters, before → after (60s runs, same machine):
 | Process working set | 277 MB → 771 MB (Δ ~494 MB) | 264 MB → 340 MB (Δ ~76 MB) |
 | GC committed size | 63 MB → 564 MB (Δ ~501 MB) | 69 MB → 137 MB (Δ ~68 MB) |
 
-A ~85–90% reduction, reproduced across two separate 60s runs (Δ 55 MB and Δ 62 MB managed
-heap). **Still not a clean pass against the 50 MB budget** — the remaining ~60–75 MB is not
-further root-caused in this pass. The build plan's own standing candidate remains the leading
-explanation for what's left: 60 seconds may not be enough time for gen2 to reclaim everything
-a longer run would show getting collected. Not chased further here because the return here
-was already large and M2/M3 are the larger remaining scope; worth a longer (5–10 minute) run
-with the same counters if this needs to be a clean pass rather than a large improvement.
+A ~85–90% reduction, reproduced across four separate 60s runs after this fix (Δ 55, 62, 57,
+and 66 MB managed heap). **Still not a clean pass against the 50 MB budget** — the remaining
+~55–75 MB is not further root-caused in this pass. The build plan's own standing candidate
+remains the leading explanation for what's left: 60 seconds may not be enough time for gen2
+to reclaim everything a longer run would show getting collected. Not chased further here
+because the return here was already large and M2/M3 are the larger remaining scope; worth a
+longer (5–10 minute) run with the same counters if this needs to be a clean pass rather than
+a large improvement.
+
+## A second, larger regression found and reverted: the row-styling fix (see PROGRESS.md)
+
+A separate defect fix in this same pass — keeping a row's `large`/`evicted`/`deadLettered`
+grid classes from going stale (see PROGRESS.md's M1-remainder step 3) — was built around a
+`PropertyChanged` subscription per realized row. Measuring it caught a serious regression
+before it shipped: **~290–340 MB heap growth over 60s with the subscription active, plus a
+reintroduced shutdown delay**, even after filtering the handler down to only the three
+relevant properties. Bisected by toggling the subscription on and off with everything else
+identical — confirmed it was the cause, not measurement noise (~57–94 MB immediately either
+side of it once removed). The cost is in Avalonia's per-`Classes.Set` style re-evaluation
+under an imperative event handler, not the invocation count. **Reverted rather than shipped**
+— the styling staleness it fixed is cosmetic and narrow; a 4–6x regression on a criterion this
+pass had just spent real effort fixing is not a trade worth making. See
+`src/EventScope.App/Views/RowStateClassSync.cs`'s remarks for the full account and a cheaper
+approach worth trying later (a declarative `Classes.large="{Binding IsLarge}"` binding, which
+this pass proved safe for the SIZE column's own cell but which doesn't directly apply to the
+row container itself, since `DataGridRow` isn't user-templated).
 
 ## Slow shutdown: no longer reproduces, most likely the same cause
 
