@@ -772,6 +772,66 @@ was created under `%LOCALAPPDATA%\EventScope\sessions\` by this exact run.
 
 ---
 
+### M2 step 5 — the FTS indexer (this pass)
+
+**`FtsIndexer`** (`EventScope.Storage/Search/`, new) implements the build plan §3.4 catch-up
+batch essentially verbatim: one `BEGIN IMMEDIATE`/`COMMIT`, the window computed once
+(`newHwm` = the id of the last row in a batch of up to `CatchUpBatchSize` = 2000) so both
+`body_fts` and `ident_fts` index an identical row range, and `index_state.fts_hwm` advanced
+**in the same transaction** as the inserts — FTS5 does not dedupe rowids, so re-indexing
+after a crash between the inserts and the hwm advance would create duplicates. The window is
+computed separately from "the rows actually inserted" specifically because `body_fts` skips
+rows with a `NULL` `body_head`, but the high-water mark still has to move past them or
+they'd be retried forever.
+
+**Wired into `SqliteBatchWriter.RunLoop`**, not called separately from ingest: after each
+insert batch (and any pending `SetFlags`/`Checkpoint`), if the queue is empty, it spends up to
+a 10 ms budget running catch-up batches (§3.6: "if queue depth is low, run index batches
+until a 10 ms-per-200 ms budget is spent"). Same thread, same connection as every insert —
+a second write connection would mean `BEGIN IMMEDIATE` contention and `SQLITE_BUSY` storms,
+exactly what this avoids by construction. Idle maintenance layered on top of that: `('merge',
+-16)` every 50 fully-idle iterations (~10 s at the normal 200 ms batch window) once caught up,
+and `('optimize')` once, in `Dispose`'s cleanup, best-effort (swallows a `SqliteException` so
+a broken connection from a prior fatal error can't block shutdown).
+
+**Index lag** (`SqliteBatchWriter.IndexLag`, `MAX(messages.id) − fts_hwm`) refreshed by the
+writer thread after every indexing pass into a plain `long` field — safe to read from any
+thread the same way `PendingCount` already was, and for the same reason: whole-word reads
+need no synchronization, and a briefly stale value is exactly as acceptable here as it already
+is there. Not yet wired into the status bar — that's step 6, alongside the search UI it
+actually informs.
+
+**A genuine SQLite/FTS5 finding, not assumed, that shaped the tests.** `SELECT COUNT(*) FROM
+body_fts` (or `ident_fts`) with no `MATCH` clause does **not** reliably report how many rowids
+are actually indexed in an external-content table — measured directly (a minimal standalone
+repro), it reflects the underlying content table's (`messages`) row count instead, so it
+reports the same number whether a row was actually indexed or deliberately skipped (e.g. a
+null `body_head`). First discovered as a failing test that looked like an indexer bug; it
+wasn't — the indexer's `ExecuteNonQuery` affected-row-count already confirmed the correct
+single row went in. Every test now verifies indexed content via a real `MATCH` query instead,
+which is also more representative of what the index is actually for. Two more, smaller FTS5
+syntax findings from the same debugging session: the `'merge'` special command needs a
+`rank` column in its column list (`INSERT INTO fts(fts, rank) VALUES('merge', N)`, not just
+`INSERT INTO fts(fts) VALUES('merge', N)`); and a bare `-` inside a query string is FTS5's
+NOT operator, so a hyphenated value like a `c-1`-shaped correlation id has to be
+double-quoted as a literal phrase or the parser reads it as "match `c`, exclude `1`".
+
+**Trigram-specific test constraint, confirmed rather than assumed from the build plan's own
+warning:** `ident_fts` queries under 3 characters match nothing, and there is no `*` prefix
+wildcard support the way `body_fts` (unicode61) has — both measured directly while writing
+these tests, not just taken on faith from §3.4's text. Tests spot-check individual known
+values instead of one blanket wildcard query as a result.
+
+Tests: 84, up from 77 — 13 new: `FtsIndexerTests` ×5 (every row indexed and hwm advances to
+the last id; hwm advances past a null-`body_head` row that `body_fts` itself skips;
+re-running a caught-up batch is a no-op with no duplicates; a backlog larger than one
+catch-up batch needs two calls; `merge`/`optimize` don't throw against a real schema) and
+`SqliteBatchWriterIndexingTests` ×2 (rows are indexed automatically once the writer goes
+idle, with no separate caller; index lag reflects a deliberately large backlog until it
+catches up) in `EventScope.Storage.Tests`.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -784,9 +844,10 @@ was created under `%LOCALAPPDATA%\EventScope\sessions\` by this exact run.
   heap-growth regression (see above and `RowStateClassSync.cs`). A declarative binding
   approach is untried and may be cheaper — worth a look before M2's UI work if this needs to
   be fully correct rather than just visually adequate most of the time.
-- **M2, remaining.** Day-file rolling and retention/eviction are done (see above). Still
-  pending: the FTS indexer, `body_fts`/`ident_fts` tiered search, pinned JSON-field columns,
-  settings view.
+- **M2, remaining.** Day-file rolling, retention/eviction, and the FTS indexer are done (see
+  above). Still pending: tiered search against `body_fts`/`ident_fts` (the search bar itself
+  is still `IsEnabled="False"` in `MainWindow.axaml`), pinned JSON-field columns, settings
+  view.
 - **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for
   cycle detection), JSON tree editor, preview pane, schema inference, burst publish.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the

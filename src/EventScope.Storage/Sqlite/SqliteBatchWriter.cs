@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
+using EventScope.Storage.Search;
 
 namespace EventScope.Storage.Sqlite;
 
@@ -16,17 +17,35 @@ public sealed class SqliteBatchWriter : IDisposable
     public const int BatchRowLimit = 500;
     public static readonly TimeSpan BatchTimeLimit = TimeSpan.FromMilliseconds(200);
 
+    /// <summary>Budget for indexing catch-up batches, spent only when the queue is otherwise
+    /// idle — build plan §3.6: "after each ingest commit, if queue depth is low, run index
+    /// batches until a 10 ms-per-200 ms budget is spent."</summary>
+    private static readonly TimeSpan IndexingBudget = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>How many fully-idle loop iterations between <c>('merge', -16)</c> calls —
+    /// roughly every 10 s at the 200 ms batch window, when there is nothing else to do.</summary>
+    private const int MergeEveryIdleIterations = 50;
+
     private readonly SqliteConnection _connection;
     private readonly SubjectInterner _subjects;
     private readonly TimeProvider _timeProvider;
     private readonly BlockingCollection<WriteOp> _queue = new(new ConcurrentQueue<WriteOp>());
     private readonly Thread _thread;
+    private long _cachedIndexLag;
+    private int _idleIterationsSinceMerge;
 
     /// <summary>Diagnostic only — number of ops enqueued but not yet committed. Used to
     /// confirm/refute the backlog theory behind PROGRESS.md's unexplained heap growth before
     /// any fix is made; kept afterward since it is generally useful for surfacing writer
     /// health (e.g. a future status-bar "write lag" indicator).</summary>
     public int PendingCount => _queue.Count;
+
+    /// <summary>Index lag in rows — <c>MAX(messages.id) − fts_hwm</c> — refreshed by the
+    /// writer thread after every indexing pass. Safe to read from any thread; a plain
+    /// <see cref="long"/> field is sufficient since only whole-word reads/writes ever happen
+    /// (no read-modify-write), and a briefly stale value is exactly as acceptable here as
+    /// <see cref="PendingCount"/>'s equivalent staleness already is.</summary>
+    public long IndexLag => Interlocked.Read(ref _cachedIndexLag);
 
     public SqliteBatchWriter(string databasePath, TimeProvider? timeProvider = null)
     {
@@ -117,6 +136,26 @@ public sealed class SqliteBatchWriter : IDisposable
                     checkpointRequested = false;
                 }
 
+                // "If queue depth is low, run index batches until a 10 ms-per-200 ms budget
+                // is spent" (§3.6) — the queue being empty right now, after this iteration's
+                // batch window elapsed with nothing more to take, is the simplest honest
+                // reading of "low."
+                if (_queue.Count == 0)
+                {
+                    var caughtUp = RunIndexingBudget();
+                    _cachedIndexLag = FtsIndexer.GetLagRows(_connection);
+
+                    if (caughtUp && ++_idleIterationsSinceMerge >= MergeEveryIdleIterations)
+                    {
+                        FtsIndexer.Merge(_connection);
+                        _idleIterationsSinceMerge = 0;
+                    }
+                }
+                else
+                {
+                    _idleIterationsSinceMerge = 0;
+                }
+
                 foreach (var barrier in barriers) barrier.TrySetResult();
                 barriers.Clear();
 
@@ -125,6 +164,16 @@ public sealed class SqliteBatchWriter : IDisposable
         }
         finally
         {
+            try
+            {
+                FtsIndexer.Optimize(_connection);
+            }
+            catch (SqliteException)
+            {
+                // Best-effort - a broken connection (e.g. this shutdown was triggered by a
+                // prior fatal error) must not prevent the cleanup below from still running.
+            }
+
             // Microsoft.Data.Sqlite pools the underlying native handle by default, so
             // Dispose() alone leaves the file locked on Windows — the same collision the
             // build plan §3.6 calls out for deleting a day file. ClearAllPools forces every
@@ -198,6 +247,20 @@ public sealed class SqliteBatchWriter : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>Runs catch-up batches until either fully caught up or <see cref="IndexingBudget"/>
+    /// is spent. Returns <see langword="true"/> if it stopped because it caught up (nothing
+    /// left to index), <see langword="false"/> if it stopped because the budget ran out.</summary>
+    private bool RunIndexingBudget()
+    {
+        var deadline = _timeProvider.GetUtcNow() + IndexingBudget;
+        while (_timeProvider.GetUtcNow() < deadline)
+        {
+            if (FtsIndexer.RunOneBatch(_connection) == 0) return true;
+        }
+
+        return false;
     }
 
     public void Dispose()
