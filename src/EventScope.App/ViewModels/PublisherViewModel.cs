@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Publisher;
@@ -86,6 +87,16 @@ public partial class PublisherViewModel : ObservableObject
         _sinkProvider = sinkProvider ?? (() => null);
         _runner = new GenerationRunner(timeProvider);
         _tree.Changed += ScheduleRecompute;
+        Recompute();
+    }
+
+    /// <summary>"Use as publish template" (build plan §5 M3 step 10): replaces the tree's
+    /// content with a consumed message's body, inferring a generator per leaf
+    /// (<see cref="SchemaInference"/>) so the template is immediately re-publishable with
+    /// fresh values rather than a frozen copy of what was consumed.</summary>
+    public void LoadFromConsumedMessage(JsonNode? json)
+    {
+        _tree.LoadFrom(json, inferGenerators: true);
         Recompute();
     }
 

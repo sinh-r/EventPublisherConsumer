@@ -132,4 +132,27 @@ public sealed class PublisherTreeModelTests
         Assert.Equal("abc", idNode.Generator);
         Assert.Equal(PublisherFieldType.Object, tree.Root.Type);
     }
+
+    [Fact]
+    public void LoadFrom_with_inference_seeds_a_guid_shaped_leaf_with_the_guid_token()
+    {
+        var tree = new PublisherTreeModel();
+
+        tree.LoadFrom(JsonNode.Parse("""{"id":"3fa85f64-5717-4562-b3fc-2c963f66afa6"}"""), inferGenerators: true);
+
+        Assert.Equal("{{guid}}", tree.FlattenedRows.Single().Generator);
+    }
+
+    [Fact]
+    public void LoadFrom_replaces_content_in_place_keeping_the_same_FlattenedRows_instance()
+    {
+        var tree = new PublisherTreeModel();
+        tree.AddField(tree.Root, "old");
+        var rowsInstance = tree.FlattenedRows;
+
+        tree.LoadFrom(JsonNode.Parse("""{"new":"value"}"""));
+
+        Assert.Same(rowsInstance, tree.FlattenedRows);
+        Assert.Equal(["new"], tree.FlattenedRows.Select(r => r.Key));
+    }
 }

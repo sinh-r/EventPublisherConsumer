@@ -1212,6 +1212,78 @@ fields carrying through to the published message).
 
 ---
 
+### M3 step 10 — schema inference, the publish path, and `KafkaEventSink` — closes M3
+
+**`KafkaEventSink`** (`EventScope.Brokers.Kafka/`) — the first `IEventSink` implementation.
+`ProduceAsync` is genuinely async in the Confluent client (unlike `Consume()`'s blocking-sync
+shape `KafkaEventSource` has to run on a dedicated thread for), so no threading trick is
+needed here. `OutgoingMessage.Body` serializes to UTF-8 JSON bytes as the Kafka message
+value; `PartitionKey` maps to the Kafka message *key*, which is what genuinely determines
+partition placement in real Kafka rather than being a separate concept the way it might be in
+ASB/SQS; `ContentType`/`CorrelationId`/`ApplicationProperties` become headers. `SessionId` and
+`TimeToLive` have no native Kafka mapping (no session concept, no per-message TTL — only
+topic-level retention) and are silently unused, documented in the class's own remarks rather
+than left as a silent gap. `EventSinkFactory` mirrors `EventSourceFactory`'s
+env-var-driven pattern (`EVENTSCOPE_KAFKA_BOOTSTRAP`), except returning `null` — "no sink
+configured" — is the expected common case here, not a fallback to a fake the way the source
+side falls back to `FakeEventSource`.
+
+**Schema inference** (`EventScope.App/Publisher/SchemaInference.cs`) — exactly the three
+shapes the build plan names: a GUID-shaped string infers `{{guid}}`; an ISO-8601-shaped
+string infers `{{now:iso}}`; a whole-number value infers `{{int:min..max}}` bracketing the
+observed value (a fractional number is left as a literal — "bracketing an int range" doesn't
+apply to a value that isn't one). The bracket width isn't specified more precisely than
+"bracketing" by the plan, so it's a symmetric span at least as wide as the observed
+magnitude, floored at zero for a non-negative observed value — documented as a deliberate,
+un-derived heuristic rather than implied to be the One True Answer. `PublisherTreeModel`
+gained `LoadFrom(json, inferGenerators)` — replacing the tree's content **in place** (same
+`FlattenedRows` instance, so the view's binding survives) rather than the model being torn
+down and reconstructed, which the view's `Rows` binding would need help noticing.
+`PublisherViewModel.LoadFromConsumedMessage` wires it up, and `MainWindowViewModel` exposes
+it as "Use as template" — a button next to the detail pane header, disabled while the
+payload is unavailable, that parses the selected message's body as JSON (a no-op, not a
+throw, if it isn't valid JSON) and opens the publisher panel on the result.
+
+**Manually verified against the real running app**, not just tests — started the fake
+source, selected a live-ingested row via keyboard-driven `DataGrid` selection (Avalonia's
+`DataGridRow`/`DataItem` automation peers don't expose `SelectionItemPattern` the way a
+`ListItem` would, so `SendKeys` arrow-key navigation stood in for the click-based technique
+used elsewhere in this pass), clicked "Use as template", and confirmed the publisher tree
+populated with the message's actual four fields and the *correct* per-field inference:
+`sequence` → `{{int:0..5069150}}`, `amount` → `{{int:0..1150}}`, `correlationId` → `{{guid}}`,
+and the long literal `padding` field left untouched as a literal (matched neither shape,
+correctly) — this is the acceptance behaviour in the flesh, not just a green unit test.
+
+**The round-trip acceptance test exists but its limitation is stated, not implied
+away**: `KafkaRoundTripAcceptanceTests` (in `EventScope.Brokers.Kafka.Tests`, not
+`EventScope.App.Tests`, matching every other broker test's isolation from the UI layer)
+publishes via `KafkaEventSink`, consumes it back via `KafkaEventSource`, and asserts the body
+shape and correlation id survive — gated behind `EVENTSCOPE_KAFKA_BOOTSTRAP`/
+`EVENTSCOPE_KAFKA_TOPIC` and skipping by default, exactly like the existing Kafka integration
+test, because this machine has no live broker to run it against. The "consume → Use as
+publish template" half of the criterion's own wording is covered separately, against the
+tree/schema-inference code, by `EventScope.App.Tests` — duplicating that against a real
+broker would test the same code twice for no added confidence.
+
+Tests: 195, up from 178 — 17 new. `KafkaEventSinkTests` ×7 in
+`EventScope.Brokers.Kafka.Tests` (body serialization, partition-key-to-Kafka-key mapping
+both ways, content-type/correlation-id/application-properties headers, no headers object at
+all when nothing needs one, flush-then-dispose on shutdown) against a hand-rolled
+`FakeKafkaProducer` (same style as the existing `FakeKafkaConsumer` — every member
+`KafkaEventSink` never touches throws `NotSupportedException`). `KafkaRoundTripAcceptanceTests`
+×1, skipped by default (no broker). `SchemaInferenceTests` ×7 and two new
+`PublisherTreeModelTests`/one new `PublisherViewModelTests` in `EventScope.App.Tests`
+(guid/iso8601/plain-string/whole-number/negative-number/fractional-number inference,
+`LoadFrom` seeding a guid-shaped leaf correctly, `LoadFrom` preserving the `FlattenedRows`
+instance across a full content replacement, and `LoadFromConsumedMessage` wiring both
+together end to end).
+
+**M3 is closed.** The generator engine (step 8), the publisher UI (step 9), and schema
+inference plus the publish path (step 10) are all done, tested, and manually verified against
+the real running app.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -1226,12 +1298,10 @@ fields carrying through to the published message).
   be fully correct rather than just visually adequate most of the time.
 - **M2 is complete** (see above) — day-file rolling, retention/eviction, the FTS indexer,
   tiered search, pinned JSON-field columns, a settings view, and the chaos soak test.
-- **M3, remaining.** The generator engine (step 8) and the publisher UI (step 9 — tree editor,
-  generation wiring, coloured preview, envelope tab, publish/burst against an injectable sink
-  provider) are done (see above). Still pending: schema inference from a consumed message, and
-  the publish path's real broker leg (`KafkaEventSink`, round-trip acceptance test) — until
-  that lands, `Publish`/`Burst` correctly report "no publish target connected" rather than
-  doing anything.
+- **M3 is complete** (see above) — the generator engine, the publisher UI, schema inference
+  ("Use as template"), and the publish path (`KafkaEventSink`, opt-in round-trip acceptance
+  test) are all done. `Publish`/`Burst` report "no publish target connected" until
+  `EVENTSCOPE_KAFKA_BOOTSTRAP` is set, by design.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the
   capability-binding audit (no `if (broker == …)` in the view layer).
 - **Stage 5 — polish.** Connection manager + per-broker forms, deep-search overlay,

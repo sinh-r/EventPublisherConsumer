@@ -27,9 +27,9 @@ public sealed class PublisherTreeModel
     /// debounces this into a plan recompute.</summary>
     public event Action? Changed;
 
-    public PublisherTreeModel(PublisherNode? root = null)
+    public PublisherTreeModel()
     {
-        Root = root ?? new PublisherNode(null, 0) { Type = PublisherFieldType.Object };
+        Root = new PublisherNode(null, 0) { Type = PublisherFieldType.Object };
         SubscribeAll(Root);
         Rebuild();
     }
@@ -155,12 +155,28 @@ public sealed class PublisherTreeModel
     /// so an untouched template still publishes exactly what was consumed.</summary>
     public static PublisherTreeModel FromJson(JsonNode? json)
     {
-        var root = new PublisherNode(null, 0);
-        PopulateFrom(root, json);
-        return new PublisherTreeModel(root);
+        var model = new PublisherTreeModel();
+        model.LoadFrom(json);
+        return model;
     }
 
-    private static void PopulateFrom(PublisherNode node, JsonNode? json)
+    /// <summary>Replaces this tree's content in place with <paramref name="json"/> — "Use as
+    /// publish template" from a consumed message, without discarding this model's
+    /// <see cref="FlattenedRows"/> instance identity (the view's binding stays intact; a brand
+    /// new <see cref="PublisherTreeModel"/> would need the owning view model to re-point every
+    /// binding at a new collection instead of relying on this one's own change notifications).
+    /// When <paramref name="inferGenerators"/> is true, each leaf's <see cref="PublisherNode.Generator"/>
+    /// is seeded via <see cref="SchemaInference.InferGenerator"/> instead of the observed
+    /// literal verbatim (build plan §5 M3 step 10's "GUID regex → {{guid}}", etc.).</summary>
+    public void LoadFrom(JsonNode? json, bool inferGenerators = false)
+    {
+        Root.Children.Clear();
+        PopulateFrom(Root, json, inferGenerators);
+        Rebuild();
+        Changed?.Invoke();
+    }
+
+    private void PopulateFrom(PublisherNode node, JsonNode? json, bool inferGenerators)
     {
         switch (json)
         {
@@ -169,7 +185,8 @@ public sealed class PublisherTreeModel
                 foreach (var (key, value) in obj)
                 {
                     var child = new PublisherNode(node, node.Depth + 1) { Key = key };
-                    PopulateFrom(child, value);
+                    SubscribeAll(child);
+                    PopulateFrom(child, value, inferGenerators);
                     node.Children.Add(child);
                 }
                 break;
@@ -179,7 +196,8 @@ public sealed class PublisherTreeModel
                 foreach (var value in arr)
                 {
                     var child = new PublisherNode(node, node.Depth + 1, isArrayElement: true);
-                    PopulateFrom(child, value);
+                    SubscribeAll(child);
+                    PopulateFrom(child, value, inferGenerators);
                     node.Children.Add(child);
                 }
                 break;
@@ -192,7 +210,9 @@ public sealed class PublisherTreeModel
                     _ => PublisherFieldType.String,
                 };
                 node.Value = value.ToJsonString().Trim('"');
-                node.Generator = node.Value;
+                node.Generator = inferGenerators
+                    ? SchemaInference.InferGenerator(node.Value, node.Type)
+                    : node.Value;
                 break;
 
             default: // null or missing

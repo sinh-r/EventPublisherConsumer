@@ -159,6 +159,19 @@ public sealed class PublisherViewModelTests
     }
 
     [Fact]
+    public void LoadFromConsumedMessage_replaces_the_tree_and_infers_generators()
+    {
+        var vm = new PublisherViewModel();
+
+        vm.LoadFromConsumedMessage(System.Text.Json.Nodes.JsonNode.Parse(
+            """{"id":"3fa85f64-5717-4562-b3fc-2c963f66afa6"}"""));
+
+        var row = Assert.Single(vm.Rows);
+        Assert.Equal("{{guid}}", row.Generator);
+        Assert.False(vm.HasValidationIssue);
+    }
+
+    [Fact]
     public void Selecting_the_envelope_tab_updates_the_selected_flags()
     {
         var vm = new PublisherViewModel();

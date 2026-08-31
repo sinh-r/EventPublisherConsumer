@@ -3,8 +3,10 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Collections;
 using EventScope.App.Ingest;
+using EventScope.App.Publisher;
 using EventScope.App.Settings;
 using EventScope.Brokers.Kafka;
+using EventScope.Core.Abstractions;
 using EventScope.Storage.Retention;
 using EventScope.Storage.Search;
 using EventScope.Storage.Sqlite;
@@ -26,6 +28,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private IngestPipeline? _pipeline;
     private SessionStore? _sessionStore;
     private RetentionService? _retentionService;
+    private IEventSink? _sink;
     private long _lastStatsTotal;
     private DateTime _lastStatsTimeUtc;
 
@@ -48,7 +51,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public SettingsViewModel Settings { get; }
 
-    public PublisherViewModel Publisher { get; } = new();
+    public PublisherViewModel Publisher { get; }
 
     [ObservableProperty]
     public partial bool IsSettingsOpen { get; set; }
@@ -62,10 +65,34 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private void TogglePublisher() => IsPublisherOpen = !IsPublisherOpen;
 
+    /// <summary>"Use as publish template" (build plan §5 M3 step 10): schema-infers a
+    /// generator per leaf from the currently selected message's body and opens the publisher
+    /// panel on it. A no-op if nothing is selected or the body isn't parseable JSON — this is
+    /// a convenience, not a path that should ever throw into the UI.</summary>
+    [RelayCommand]
+    private void UseSelectedAsTemplate()
+    {
+        if (Detail.BodyText is not { Length: > 0 } bodyText) return;
+
+        System.Text.Json.Nodes.JsonNode? json;
+        try
+        {
+            json = System.Text.Json.Nodes.JsonNode.Parse(bodyText);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return;
+        }
+
+        Publisher.LoadFromConsumedMessage(json);
+        IsPublisherOpen = true;
+    }
+
     public MainWindowViewModel()
     {
         Search = new SearchViewModel(Rows, () => _sessionStore is null ? null : new FtsSearchService(_sessionStore));
         Settings = new SettingsViewModel(_settings, () => _sessionStore, () => _retentionService);
+        Publisher = new PublisherViewModel(sinkProvider: () => _sink ??= EventSinkFactory.Create());
         _statsTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(250),
@@ -197,5 +224,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         _retentionService?.Dispose();
         _sessionStore?.Dispose();
+
+        if (_sink is not null)
+        {
+            await _sink.DisposeAsync().ConfigureAwait(true);
+        }
     }
 }
