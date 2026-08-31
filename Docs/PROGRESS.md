@@ -1016,6 +1016,89 @@ alongside it.
 
 ---
 
+## M3 — publisher
+
+### M3 step 8 — the generator engine (this pass)
+
+All new, all in `EventScope.Core/Generation/`, no UI — build plan §3.5's two-pass engine,
+built exactly to spec plus the grammar details the plan itself left unspecified (documented
+below, not guessed at silently).
+
+**Pass 1 — the lexer and planner.** `GeneratorLexer.Lex` splits one leaf's template string
+into `Literal` and token segments — a template freely mixes literal text with `{{...}}`
+tokens (`"order-{{ref:$.id}}-{{guid}}"`), which the plan's own examples imply but never
+states as a grammar. Every token carries a `TextSpan` (start, length, 1-based line) over its
+own `{{...}}` text for inline diagnostics. An unrecognized token kind or an unterminated
+`{{` is kept as literal text rather than rejected — a typo'd template should still round-trip
+visibly instead of vanishing or throwing.
+
+`GenerationPlanner.Build` then builds the `{{ref}}` dependency graph in CSR form
+(`edgeStart`/`edgeTarget`/`inDegree` `int[]`s, never `List<int>[]`) and computes a fill order
+by **iterative Kahn** — an explicit `Queue<int>`, no recursion anywhere in either graph
+algorithm, because the acceptance criterion is literally "not stack-overflowed" over a
+100,000-node chain and no `catch` recovers from `StackOverflowException`. Nodes Kahn never
+dequeues (in a cycle, or transitively depending on one) are handed to **iterative Tarjan
+SCC** — a per-node edge cursor array standing in for the call stack, restricted to just those
+residual nodes — which names every SCC of size > 1, plus every self-loop, as a `RefCycle`: a
+closed walk of `CycleHop`s in the direction the refs were actually written (`$.a → $.b → $.a`
+reads the same way the user typed it), found by following {{ref}} edges within the SCC until
+a node repeats — robust regardless of which SCC member the walk happens to start from,
+verified by a dedicated test where the chosen start isn't the one that closes the loop. An
+unknown ref path is `UnresolvedRef`, not a cycle — reported separately with its own span,
+never given a graph edge at all (so it can't accidentally look like a self-cycle to Kahn).
+
+**Pass 2 — the runner.** `GenerationRunner.Fill` walks `GenerationPlan.FillOrder`, writing
+into a reused `string?[]` sized to the plan and a reused `StringBuilder` scratch buffer — a
+literal-only leaf (the common case) skips the builder entirely and returns its text directly.
+Resolving a `Ref` segment is a straight array read, guaranteed already-filled by the
+topological order for any leaf outside a cycle; a leaf inside (or depending on) a reported
+cycle may read a not-yet-filled dependency as an empty contribution — by design, not a
+runtime exception, since `PlanDiagnostics` is how the caller is meant to find out *before*
+publish, exactly as §3.5 specifies for the editor-side "Invalid: unresolved ... at line 8"
+treatment. `Guid.CreateVersion7()` for `{{guid}}`; `Random.Shared` for `{{int}}`/`{{pick}}`;
+`{{now}}` reads a `TimeProvider` (default `TimeProvider.System`, injectable for tests) rather
+than `DateTimeOffset.UtcNow` directly, consistent with every other clock in this codebase.
+
+**Grammar filled in, since the build plan states example tokens but never a full grammar:**
+a token is `{{kind}}` or `{{kind:argument}}`, kind matched case-insensitively against
+`ref`/`guid`/`int`/`pick`/`now`. `{{int}}` defaults to `0..1_000_000`;
+`{{int:min..max}}` is inclusive on both ends. `{{pick:a|b|c}}` uses `|` as the option
+separator (not `,`, since a JSON value is a very plausible option to want to pick between,
+and those routinely contain commas). `{{now}}` / `{{now:iso}}` both format as `"O"`
+(round-trip ISO 8601); any other argument is passed straight to `DateTimeOffset.ToString` as
+a .NET custom/standard format string.
+
+**Plan caching (the performance story per §3.5) is a property of the design, not separate
+code to write:** `GenerationPlan` depends only on leaf paths and template text, never on
+generated values, so one plan safely backs any number of `Fill` calls — proven directly by
+the 1,000-GUID-burst test reusing one `GenerationPlanner.Build` result across 1,000 `Fill`
+calls on the same `GenerationRunner`.
+
+Tests: 158, up from 128 — 30 new, all in a new `EventScope.Core.Tests/Generation/` folder.
+`GeneratorLexerTests` ×10 (literal/token interleaving, case-insensitive kind matching, an
+unrecognized kind and an unterminated token both surviving as literal text, span/line
+correctness, and the five token-argument shapes as a `Theory`). `GenerationPlannerTests` ×9
+(ref ordering, an unresolved ref's span, a self-reference as a 1-hop cycle, a 2-node cycle as
+a closed walk, every leaf still appearing exactly once in fill order even when cyclic, a leaf
+that merely *depends on* a cycle not being reported as cyclic itself, the 100,000-node chain
+completing with a fully verified dependency-respecting order, and an injected back-edge on a
+1,000-node chain reporting as exactly one cycle without disturbing the unaffected prefix of
+the chain). `GenerationRunnerTests` ×11 (literal fill, ref resolution, the 1,000-distinct-GUID
+burst, GUID format validity, `{{int}}` default and explicit ranges, `{{pick}}` membership,
+`{{now}}` against an injected fake clock, an unresolved ref filling to an empty contribution
+rather than throwing, and a cyclic leaf still producing *something* rather than hanging).
+
+**One correction found while writing the planner tests, not a bug in the shipped code:** the
+first draft of the 100k-chain and back-edge tests gave leaf 0 the path `"$.0"` (with a dot)
+while every other leaf's `{{ref:$N}}` token pointed at `"$N"` (without one) — a copy-paste
+mismatch between the path-naming scheme and the ref-target-naming scheme in the *test data*,
+not the lexer or planner. Every leaf from index 1 onward would have reported `UnresolvedRef`
+against leaf 0, which the test's own `Assert.False(plan.Diagnostics.HasIssues)` caught
+immediately on the first run — exactly the kind of thing that assertion exists to catch.
+Fixed by using the same naming scheme everywhere in the test data.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -1030,8 +1113,10 @@ alongside it.
   be fully correct rather than just visually adequate most of the time.
 - **M2 is complete** (see above) — day-file rolling, retention/eviction, the FTS indexer,
   tiered search, pinned JSON-field columns, a settings view, and the chaos soak test.
-- **M3 — publisher.** Generator token parser + two-pass engine (Kahn + Tarjan SCC for
-  cycle detection), JSON tree editor, preview pane, schema inference, burst publish.
+- **M3, remaining.** The generator engine (token lexer, `GenerationPlanner`,
+  `GenerationRunner` — see above) is done. Still pending: the publisher UI (`JsonNode`-backed
+  tree editor via `TreeDataGrid`, preview pane, tab strip switching), schema inference, and
+  the publish path (burst publish, `KafkaEventSink`, round-trip acceptance test).
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the
   capability-binding audit (no `if (broker == …)` in the view layer).
 - **Stage 5 — polish.** Connection manager + per-broker forms, deep-search overlay,
