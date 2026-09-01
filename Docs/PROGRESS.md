@@ -1445,6 +1445,69 @@ toast, light theme, full keyboard map, and concurrent multi-connection pipelines
 
 ---
 
+## Distribution pass — repo made shareable (this pass)
+
+You asked for the distribution step so the repo can be shared publicly; you are creating the
+GitHub repository yourself. This executes `Docs/DISTRIBUTION_PLAN.md`'s Phase 1 (repo
+preparation) against the app's actual current state — substantially more capable than when
+that plan and the original README were written — and resolves the one open item that
+explicitly blocked going public.
+
+- **Mockup runtime redistribution, resolved.** Blocked item 3 above:
+  `Mockup preparation from spec/support.js` is Claude Design's generated `dc-runtime` bundle,
+  marked "GENERATED ... do not edit," with no license header — its terms under this repo's MIT
+  license were never something the code could settle. Untracked (`git rm --cached`, file kept
+  on disk) and added to `.gitignore`, since it's only needed locally to render
+  `EventScope.dc.html` in a browser for manual UI verification — never shipped, never needed
+  to build or run the app. `styles.css` and `_ds_bundle.js` alongside it stay tracked, per the
+  original finding that only `support.js` itself carries the licensing concern.
+- **Secret audit re-run against full history, clean.** `git log --all -p` scanned for AWS/Azure
+  key and connection-string shapes, private-key headers, and credential-shaped filenames ever
+  committed. Two hits, both benign: a `"s3cret"` test fixture value in this pass's own Kafka
+  tests, and a `"payments-prod…"` placeholder string inside the mockup's own UI markup (an
+  ellipsis-truncated display example, not a real value). Nothing else.
+- **README rewritten.** The previous version described the app before M1b even landed
+  ("nothing is written to disk yet") — nine milestones and passes out of date. Now states what
+  actually works today (real Kafka end to end, storage, search, the publisher, the connection
+  manager) versus what doesn't (Service Bus/SQS, M4), with a broker-support table and three new
+  screenshots.
+- **New screenshots, replacing four stale ones.** The previous four (`MainWindow-*.png`,
+  committed but never actually embedded in the README) predate the connection manager, the
+  publisher panel, and the current search bar — one still shows "Search — wired in M2" as a
+  disabled placeholder and has the Windows taskbar visible. Untracked and deleted. Three new
+  ones captured against the real running `v0.2.0` build (screen capture works in this session,
+  unlike the session PROGRESS.md's M1c/M1b entries recorded it failing in — confirmed directly
+  rather than assumed either way): the connection manager/launcher, a streaming consumer view
+  with a row selected and its JSON body in the detail pane, and the publisher panel populated
+  via "Use as template" showing real schema-inferred generators
+  (`{{int:0..2016936}}`, `{{guid}}`) and the coloured JSON preview.
+- **Version bumped 0.1.0 → 0.2.0** (`Directory.Build.props`, `app.manifest`) and tagged
+  `v0.2.0`, marking everything since the M1-only `v0.1.0` tag (all of M2, M3, and this pass's
+  connection manager) as one shareable snapshot. Picked as a reasonable single next step, not
+  a fixed scheme — cheap to retag before anything is ever pushed, since no remote exists yet.
+  Full suite re-verified green (233/233) at the new version before tagging.
+- **Publish pipeline re-verified end to end at the new version**, not assumed still correct:
+  `dotnet publish` per the README/`release.yml`'s own command produced a self-contained
+  `publish/EventScope.exe` (128,796,774 bytes, consistent with the M1c-era ~128 MB figure —
+  size is unaffected by this pass's changes), signed with the local dev cert (Smart App
+  Control still blocks a freshly-built unsigned exe on this machine, as documented), launched,
+  and closed cleanly. Not committed — `publish/` is gitignored, and per the distribution plan's
+  own rule, release binaries are built by CI from a tag push, never uploaded by hand.
+- **CI/release workflows and OSS scaffolding (LICENSE, CONTRIBUTING.md, `.github/ISSUE_TEMPLATE/`,
+  `.gitattributes`) reviewed, unchanged.** All were already correct and current from the
+  earlier release-readiness pass — `ci.yml`/`release.yml` already call `build/Run-Tests.ps1`
+  rather than `dotnet test`, action versions already current. Nothing to fix.
+
+**Still genuinely outstanding, not resolved by this pass** (unchanged from the Blocked section
+above except where noted): real code signing (SignPath Foundation application — unblocked
+since `v0.1.0` was tagged, more clearly justified now with M2/M3/the connection manager also
+done; still your call whether to apply now or wait further); the Scoop bucket (Phase 3, needs a
+real published release's SHA256 first); no CI run has ever executed, since there is still no
+GitHub remote — the first push will be the first real exercise of both workflows, and may
+surface ordinary CI teething issues the way any first run does.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see

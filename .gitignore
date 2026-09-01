@@ -30,6 +30,12 @@ appsettings.*.Local.json
 .env
 .env.*
 
+## Mockup runtime — generated Claude Design bundle, no license header, redistribution terms
+## unclear (see Docs/PROGRESS.md's "Blocked" section). Kept locally only: it's what
+## Mockup preparation from spec/EventScope.dc.html needs to render in a browser for manual
+## UI verification, but it is not shipped or required to build/run the app itself.
+Mockup preparation from spec/support.js
+
 ## OS
 Thumbs.db
 .DS_Store
