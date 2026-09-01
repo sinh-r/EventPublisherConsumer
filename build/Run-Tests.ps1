@@ -31,11 +31,19 @@
 
 .PARAMETER NoBuild
   Skip the build and run whatever is already in bin/.
+
+.PARAMETER TimeoutSeconds
+  Wall-clock limit per test assembly. A hung assembly (see Docs/PROGRESS.md's Blocked item 2
+  - an unpumped Avalonia dispatcher deadlocking a cross-thread Invoke) previously ran until
+  the *workflow's* timeout-minutes killed the whole job, with no assembly name attached and
+  the wait measured in minutes. This turns that into a named failure for the one assembly
+  responsible, within this many seconds. Defaults to 300.
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Debug',
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [int]$TimeoutSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,9 +76,48 @@ foreach ($proj in $testProjects) {
 
     Write-Host ""
     Write-Host "=== $name ===" -ForegroundColor Cyan
-    & $exe
-    $code = $LASTEXITCODE
+
+    # Out-of-process via raw System.Diagnostics.Process, with an explicit wait, not
+    # `& $exe` directly, so a hang can be killed and named instead of consuming the whole
+    # job's timeout-minutes. Not Start-Process -PassThru: its returned Process object's
+    # ExitCode came back empty here even for a clean exit (confirmed: HasExited was true,
+    # ExitCode was not) - a known-unreliable combination with redirected output. Reading
+    # the streams asynchronously while waiting, instead of after via temp files, also
+    # avoids a real deadlock risk of its own: a child process that writes enough output to
+    # fill the OS pipe buffer blocks until something reads it.
+    $psi = [System.Diagnostics.ProcessStartInfo]::new($exe)
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+    $proc.Start() | Out-Null
     $ran++
+
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+    $timedOut = -not $proc.WaitForExit($TimeoutSeconds * 1000)
+    if ($timedOut) {
+        # Not Process.Kill(true) (kills the whole tree) - that overload only exists on
+        # .NET 5+, and this script must also work under Windows PowerShell 5.1's .NET
+        # Framework (confirmed: throws MethodCountCouldNotFindBest there). taskkill /T /F
+        # is available on every Windows PowerShell edition and kills the tree the same way.
+        & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+        $proc.WaitForExit()
+    }
+
+    [System.Threading.Tasks.Task]::WaitAll(@($stdoutTask, $stderrTask))
+    if ($stdoutTask.Result) { Write-Host $stdoutTask.Result }
+    if ($stderrTask.Result) { Write-Host $stderrTask.Result }
+    $code = $proc.ExitCode
+
+    if ($timedOut) {
+        Write-Host "$name TIMED OUT after $TimeoutSeconds s - no test result in that window." -ForegroundColor Red
+        $failed += "$name (timeout)"
+        continue
+    }
 
     # xUnit v3 exit codes: 0 = all passed, 8 = no tests found (fine for a project whose
     # tests have not been written yet). Anything else is a real failure.

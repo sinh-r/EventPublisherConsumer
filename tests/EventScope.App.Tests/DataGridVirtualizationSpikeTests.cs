@@ -4,7 +4,6 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Headless;
 using Avalonia.Layout;
-using Avalonia.Threading;
 using Avalonia.VisualTree;
 using EventScope.App.Collections;
 using EventScope.App.ViewModels;
@@ -96,15 +95,9 @@ public class DataGridVirtualizationSpikeTests
     [Fact]
     public void Initial_bind_does_not_materialize_the_backing_store()
     {
-        // Dispatcher.UIThread.Invoke marshals onto the real UI thread regardless of which
-        // thread this method body happens to run on — required, not optional, per
-        // AcceptanceCriteriaTests' own remarks: xunit.v3's in-process runner does not
-        // guarantee a test method executes on the same OS thread HeadlessFixture.EnsureInitialized()
-        // ran on. This class's tests only ever got away without it by coincidence (landing on
-        // the same thread as whichever constructor call first initialized the dispatcher);
-        // HeadlessWarmupFixture initializing it deterministically on its own thread, before
-        // any test runs, broke that coincidence and surfaced "Call from invalid thread" here.
-        Dispatcher.UIThread.Invoke(() =>
+        // RunOnUi marshals onto the dispatcher thread regardless of which thread this method
+        // body happens to run on — see HeadlessFixture.RunOnUi's remarks.
+        HeadlessFixture.RunOnUi(() =>
         {
             var view = BuildPopulatedView(SyntheticRowCount);
             var grid = BuildGrid(view);
@@ -129,9 +122,8 @@ public class DataGridVirtualizationSpikeTests
     [Fact]
     public void A_small_scroll_touches_only_the_newly_revealed_rows()
     {
-        // See Initial_bind_does_not_materialize_the_backing_store's remarks on why this
-        // wrapper is required, not optional.
-        Dispatcher.UIThread.Invoke(() =>
+        // See HeadlessFixture.RunOnUi's remarks on why this wrapper is required, not optional.
+        HeadlessFixture.RunOnUi(() =>
         {
             var view = BuildPopulatedView(SyntheticRowCount);
             var grid = BuildGrid(view);
@@ -173,9 +165,8 @@ public class DataGridVirtualizationSpikeTests
     [Fact]
     public void Selection_survives_a_forced_reset_by_object_identity()
     {
-        // See Initial_bind_does_not_materialize_the_backing_store's remarks on why this
-        // wrapper is required, not optional.
-        Dispatcher.UIThread.Invoke(() =>
+        // See HeadlessFixture.RunOnUi's remarks on why this wrapper is required, not optional.
+        HeadlessFixture.RunOnUi(() =>
         {
             var view = BuildPopulatedView(SyntheticRowCount);
             var grid = BuildGrid(view);

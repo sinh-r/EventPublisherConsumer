@@ -3,7 +3,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Headless;
-using Avalonia.Threading;
 using EventScope.App.Collections;
 using EventScope.App.ViewModels;
 using EventScope.Core.Models;
@@ -39,9 +38,9 @@ public sealed class AcceptanceCriteriaTests
         // same OS thread that HeadlessFixture.EnsureInitialized() ran on (the thread Avalonia's
         // dispatcher actually bound to) — confirmed by measurement: run alongside other test
         // classes, constructing a DataGrid here threw "Call from invalid thread" even though
-        // the identical construction in DataGridVirtualizationSpikeTests passed. Dispatcher.
-        // Invoke marshals onto the real UI thread regardless of which thread called it from.
-        Dispatcher.UIThread.Invoke(() =>
+        // the identical construction in DataGridVirtualizationSpikeTests passed. See
+        // HeadlessFixture.RunOnUi's remarks for why this wrapper is required, not optional.
+        HeadlessFixture.RunOnUi(() =>
         {
             const int rowCount = 50_000;
             const int warmupSteps = 10;

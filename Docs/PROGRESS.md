@@ -1741,6 +1741,72 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    the only environment this bug ever reproduced reliably, and where local Smart App Control is
    moot — via the `ci` and `release` workflows on the next push.
 
+   **The sixth-attempt fix above was real but partial — a seventh, distinct mechanism reached
+   the same "hangs at near-zero CPU" signature and is what actually hung the first-ever
+   `release` run.** `AvaloniaSynchronizationContext.AutoInstall = false` closes the `await`-
+   shaped half of the problem (a posted continuation nothing drains). It does not touch the
+   other half, already present in the code before this pass and unrelated to that sync
+   context: `DataGridVirtualizationSpikeTests` (three tests) and `AcceptanceCriteriaTests`
+   (one, soak-gated) wrap their bodies in `Dispatcher.UIThread.Invoke(...)`, per those
+   classes' own remarks, because xUnit v3 does not guarantee a test method runs on the same
+   OS thread as the constructor that called `EnsureInitialized()`. `Dispatcher.Invoke` runs
+   inline only when already on the dispatcher thread; from any other thread it queues an
+   operation and **blocks the caller waiting for it to run**. Setup bound the dispatcher to
+   whatever thread called `EnsureInitialized()` first — an xUnit worker thread — and ran no
+   loop to service that queue. An `Invoke` from a different worker thread therefore deadlocks
+   forever: no exception, no CPU, indistinguishable from the sixth attempt's signature.
+
+   This exact mechanism was already reproduced and recorded, in this same item's fifth-attempt
+   notes, and misread at the time as a side effect of that attempt's assembly fixture rather
+   than as a second live bug: *"the assembly fixture forced init onto its own thread, so
+   `Dispatcher.UIThread.Invoke` from every other thread blocked on the same unpumped
+   dispatcher — turning an intermittent hang into a deterministic one."* That deterministic
+   hang **was** this mechanism; reverting the fixture only made the poisoned thread go back to
+   being thread-luck-dependent rather than closing it. Confirmed by the release run's own log:
+   `AcceptanceCriteriaTests`'s `[SKIP]` printed (it never touches the dispatcher when skipped),
+   then nothing — consistent with the very next test to run being one of
+   `DataGridVirtualizationSpikeTests`'s `Invoke`-wrapped tests, landing on a worker thread
+   other than the one `EnsureInitialized()` happened to run on first.
+
+   **Fix:** `HeadlessFixture.EnsureInitialized()` now runs headless setup on a dedicated
+   background thread it owns outright (`Thread(IsBackground = true)`, name
+   `avalonia-headless-ui`) and calls `Dispatcher.UIThread.MainLoop(CancellationToken)` on it —
+   confirmed present in Avalonia.Base 11.3.20 and exactly what Avalonia's own
+   `HeadlessUnitTestSession` runs internally. `Dispatcher.UIThread.Invoke` from any other
+   thread now completes correctly regardless of scheduling: it queues the callback, the loop
+   dequeues and runs it on the owned thread, the caller unblocks with the result. A new
+   `HeadlessFixture.RunOnUi(Action)` centralizes the pattern; the four `Dispatcher.UIThread.
+   Invoke(...)` call sites now go through it. The `AutoInstall = false` fix from the sixth
+   attempt is unchanged and still needed — the two mechanisms are independent, closing
+   different halves of the same symptom.
+
+   **Verification:** built Release; ran `DataGridVirtualizationSpikeTests` and
+   `HeadlessFixtureTests` in isolation (`-class <FullName>`) — both clean. Full
+   `EventScope.App.Tests` suite: 95/95 (94 run + 1 soak-gated skip), repeated. With
+   `EVENTSCOPE_SOAK=1` (exercises the fourth `Invoke`/`RunOnUi` site,
+   `AcceptanceCriteriaTests`, which is otherwise skipped in CI): no hang across repeated runs;
+   the frame-budget assertion itself (16 ms) intermittently failed on this sandbox machine at
+   ~18-26 ms — noise from a shared/loaded environment unrelated to this fix, not a regression,
+   and moot for the actual CI failure since neither workflow sets `EVENTSCOPE_SOAK`. Added a
+   second `HeadlessFixtureTests` case pinning the new invariant directly: from a thread
+   confirmed not to be the dispatcher thread, `Dispatcher.UIThread.InvokeAsync(...)` must
+   complete within 5 s — fails fast with a clear message instead of hanging, rather than
+   reproducing the pre-fix hang inside the test suite itself. `Run-Tests.ps1` also gained a
+   per-assembly wall-clock timeout (default 300 s) so any future occurrence of this class of
+   bug fails named and fast instead of consuming the workflow's full `timeout-minutes`; fixing
+   it surfaced that `Start-Process -PassThru`'s `ExitCode` came back empty here even for a
+   clean exit (confirmed: `HasExited` true, `ExitCode` not) — replaced with raw
+   `System.Diagnostics.Process` and asynchronous stream reads, which also avoids a real
+   pipe-buffer deadlock risk the temp-file version had. Also surfaced: `Process.Kill(true)`
+   (kill the whole process tree) only exists on .NET 5+ — confirmed to throw
+   `MethodCountCouldNotFindBest` under Windows PowerShell 5.1's .NET Framework, where this
+   script must also work even though CI itself runs under `pwsh` 7 — replaced with
+   `taskkill.exe /T /F`, available on every Windows PowerShell edition; verified directly
+   against a synthetic 30s-sleeping child process with a 3s timeout, killed at ~3.4s. The
+   authoritative check remains GitHub's `windows-latest` runner via `ci` and `release` on the
+   next push — this is the
+   second time local-clean has been misleading for this exact class of bug.
+
    **A working recipe for driving the real GUI app, established this pass:** Windows UI
    Automation from PowerShell (`Add-Type -AssemblyName UIAutomationClient`) can find
    controls by their accessible `Name` (`AutomationElement.FindFirst` with a
