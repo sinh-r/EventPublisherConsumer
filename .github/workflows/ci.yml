@@ -28,6 +28,12 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    # Default is 360 minutes. A documented, non-deterministic Avalonia-headless test hang
+    # (Docs/PROGRESS.md's Blocked item 2) can make a single test run indefinitely with
+    # near-zero CPU - first reproduced on this workflow's own runner on 2026-09-01, requiring
+    # a manual cancel after 40+ minutes. This bounds the damage to one failed run instead of
+    # a silent multi-hour hang; it does not fix the underlying race.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 

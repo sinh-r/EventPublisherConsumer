@@ -1620,6 +1620,54 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    confirmed unaffected across repeated runs; the risk is specifically in soak/heavy-load
    conditions or single-method isolation. Left open for a real fix.
 
+   **First reproduced outside this dev machine on 2026-09-01, in the normal (non-soak) suite —
+   worse than the local characterization above.** The distribution pass's first-ever push
+   (`v0.2.0` and the first `ci` run for `main`, both against commit `ced0d0d`) both hung on
+   their Test step on GitHub Actions' `windows-latest` runner, independently, at the identical
+   point: right after a clean build, before any test past the first one printed a result.
+   Confirmed genuinely hung, not slow, by elapsed time (40+ minutes against a step that takes
+   under 2 seconds locally) since job logs for an in-progress run aren't readable without
+   write access to the repository (checked directly — `GET .../actions/jobs/{id}/logs` returns
+   403 "Must have admin rights" over the public API). You supplied the log after manually
+   cancelling: `EventScope.App.Tests` printed exactly one result —
+   `AcceptanceCriteriaTests.Scrolling_fifty_thousand_rows_stays_under_the_frame_budget [SKIP]`
+   — then nothing else. **A fifth fix attempt, different in shape from the four above, was
+   tried and also did not resolve it — worse, it introduced a new, deterministic local hang
+   that didn't exist before.** Working theory: `AcceptanceCriteriaTests` is gated behind
+   `EVENTSCOPE_SOAK` and `[SKIP]`s immediately, never touching the dispatcher at all: if
+   xUnit's (confirmed non-deterministic — two consecutive local runs of the unchanged binary
+   produced two different orderings) discovery order happens to put it first, as it did on
+   this run, the *next* test needing real segment I/O hits a dispatcher that's never been
+   pumped even once, closing none of the race window the four prior attempts tried to close
+   from other angles. Attempted fix: an xUnit v3 `[assembly: AssemblyFixture(typeof(...))]`
+   (a `4.0.0` feature — confirmed by reflection before using it, not assumed) forcing a *real*
+   `RandomAccess.ReadAsync` completion through `Dispatcher.UIThread.InvokeAsync`, guaranteed to
+   run once before any test regardless of discovery order — a different shape than the four
+   prior attempts, none of which exercised a real I/O completion during warm-up, only an empty
+   pump. It did not hang locally itself, but running the assembly fixture's own headless
+   initialization on its own (different) thread broke a *coincidence*
+   `DataGridVirtualizationSpikeTests` had silently depended on since Stage 1 — namely, that
+   whichever thread first called `HeadlessFixture.EnsureInitialized()` also happened to be the
+   thread its own test bodies ran on, so its un-wrapped `new DataGrid()` calls never threw "Call
+   from invalid thread" purely by luck. With the fixture forcing initialization on a different
+   thread, three of its four tests failed with exactly that exception. Fixed *that* part
+   correctly and durably — wrapped all three in `Dispatcher.UIThread.Invoke(...)`, the same
+   established pattern `AcceptanceCriteriaTests` already uses for the identical reason (its own
+   remarks already named this exact non-guarantee) — confirmed clean across 8 consecutive local
+   runs. But with the coincidence fixed and the assembly fixture still installed, the *first*
+   test to run (whichever it was that run) hung **deterministically, every time**, inside a
+   plain synchronous `Dispatcher.UIThread.Invoke(...)` call — a new, worse failure mode than the
+   intermittent one this was meant to fix. **Reverted the assembly fixture entirely** (deleted
+   `HeadlessWarmupFixture.cs`, removed the `AssemblyFixture` attribute) rather than chase a sixth
+   theory blind, with no fast CI iteration available to verify one. Kept the
+   `DataGridVirtualizationSpikeTests` wrapping fix — independently correct and verified safe on
+   its own (8/8 clean local runs without the fixture), a real latent-fragility fix regardless of
+   this investigation's outcome. **Net result: the underlying race is still open, now on record
+   as resistant to five differently-shaped fix attempts**, four of them local-only and this
+   fifth one CI-motivated. Mitigated, not fixed: `timeout-minutes` (15 for `ci.yml`, 20 for
+   `release.yml`) added to both workflows so a future occurrence fails within a bounded time
+   instead of silently consuming hours — bounds the damage, does not close the race.
+
    **A working recipe for driving the real GUI app, established this pass:** Windows UI
    Automation from PowerShell (`Add-Type -AssemblyName UIAutomationClient`) can find
    controls by their accessible `Name` (`AutomationElement.FindFirst` with a

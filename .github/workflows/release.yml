@@ -31,6 +31,10 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    # See ci.yml's matching comment: bounds a documented, non-deterministic Avalonia-headless
+    # test hang (Docs/PROGRESS.md's Blocked item 2) to one failed run instead of a silent
+    # multi-hour one. Slightly higher than ci.yml's since this job also publishes and attests.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 

@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Headless;
 using Avalonia.Layout;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using EventScope.App.Collections;
 using EventScope.App.ViewModels;
@@ -95,93 +96,114 @@ public class DataGridVirtualizationSpikeTests
     [Fact]
     public void Initial_bind_does_not_materialize_the_backing_store()
     {
-        var view = BuildPopulatedView(SyntheticRowCount);
-        var grid = BuildGrid(view);
-        var window = new Window { Content = grid, Width = 800, Height = 400 };
+        // Dispatcher.UIThread.Invoke marshals onto the real UI thread regardless of which
+        // thread this method body happens to run on — required, not optional, per
+        // AcceptanceCriteriaTests' own remarks: xunit.v3's in-process runner does not
+        // guarantee a test method executes on the same OS thread HeadlessFixture.EnsureInitialized()
+        // ran on. This class's tests only ever got away without it by coincidence (landing on
+        // the same thread as whichever constructor call first initialized the dispatcher);
+        // HeadlessWarmupFixture initializing it deterministically on its own thread, before
+        // any test runs, broke that coincidence and surfaced "Call from invalid thread" here.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var view = BuildPopulatedView(SyntheticRowCount);
+            var grid = BuildGrid(view);
+            var window = new Window { Content = grid, Width = 800, Height = 400 };
 
-        window.Show();
-        HeadlessFixture.Pump();
+            window.Show();
+            HeadlessFixture.Pump();
 
-        // Before implementing IDataGridCollectionView, DataGrid wrapped a plain IList in
-        // its own DataGridCollectionView, whose CopySourceToInternalList() enumerated all
-        // 65,536 rows at bind time — exactly the cost this class exists to avoid. A
-        // 400px-tall grid at RowHeight 26 shows ~15 rows; realizing a couple of screenfuls
-        // of buffer is fine, realizing the whole ring is the regression this guards.
-        Assert.True(
-            view.IndexerReads is > 0 and < 200,
-            $"expected only the visible screenful to be realized at bind time, got {view.IndexerReads} reads");
+            // Before implementing IDataGridCollectionView, DataGrid wrapped a plain IList in
+            // its own DataGridCollectionView, whose CopySourceToInternalList() enumerated all
+            // 65,536 rows at bind time — exactly the cost this class exists to avoid. A
+            // 400px-tall grid at RowHeight 26 shows ~15 rows; realizing a couple of screenfuls
+            // of buffer is fine, realizing the whole ring is the regression this guards.
+            Assert.True(
+                view.IndexerReads is > 0 and < 200,
+                $"expected only the visible screenful to be realized at bind time, got {view.IndexerReads} reads");
 
-        window.Close();
+            window.Close();
+        });
     }
 
     [Fact]
     public void A_small_scroll_touches_only_the_newly_revealed_rows()
     {
-        var view = BuildPopulatedView(SyntheticRowCount);
-        var grid = BuildGrid(view);
-        var window = new Window { Content = grid, Width = 800, Height = 400 };
+        // See Initial_bind_does_not_materialize_the_backing_store's remarks on why this
+        // wrapper is required, not optional.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var view = BuildPopulatedView(SyntheticRowCount);
+            var grid = BuildGrid(view);
+            var window = new Window { Content = grid, Width = 800, Height = 400 };
 
-        window.Show();
-        HeadlessFixture.Pump();
+            window.Show();
+            HeadlessFixture.Pump();
 
-        var verticalScrollBar = grid.GetVisualDescendants().OfType<ScrollBar>()
-            .First(s => s.Orientation == Orientation.Vertical);
-        var valueBefore = verticalScrollBar.Value;
+            var verticalScrollBar = grid.GetVisualDescendants().OfType<ScrollBar>()
+                .First(s => s.Orientation == Orientation.Vertical);
+            var valueBefore = verticalScrollBar.Value;
 
-        // Initial layout necessarily touches the first screenful; only bound the cost of
-        // a *subsequent* scroll, which is the steady-state operation the spec cares about.
-        view.ResetIndexerReadCount();
+            // Initial layout necessarily touches the first screenful; only bound the cost of
+            // a *subsequent* scroll, which is the steady-state operation the spec cares about.
+            view.ResetIndexerReadCount();
 
-        // Drive real mouse-wheel input through the headless platform rather than poking
-        // ScrollBar.Value directly — DataGrid reacts to the wheel event, not to the
-        // ScrollBar's Value property changing out from under it. DataGrid realizes rows
-        // incrementally as they scroll into view (cost proportional to rows crossed, not
-        // to a fixed per-frame count), so keep this to a small, single-gesture scroll.
-        window.MouseWheel(new Point(400, 200), new Vector(0, -3));
-        HeadlessFixture.Pump();
+            // Drive real mouse-wheel input through the headless platform rather than poking
+            // ScrollBar.Value directly — DataGrid reacts to the wheel event, not to the
+            // ScrollBar's Value property changing out from under it. DataGrid realizes rows
+            // incrementally as they scroll into view (cost proportional to rows crossed, not
+            // to a fixed per-frame count), so keep this to a small, single-gesture scroll.
+            window.MouseWheel(new Point(400, 200), new Vector(0, -3));
+            HeadlessFixture.Pump();
 
-        Assert.True(
-            verticalScrollBar.Value != valueBefore,
-            $"scroll did not move the ScrollBar: value stayed at {valueBefore} (max={verticalScrollBar.Maximum})");
+            Assert.True(
+                verticalScrollBar.Value != valueBefore,
+                $"scroll did not move the ScrollBar: value stayed at {valueBefore} (max={verticalScrollBar.Maximum})");
 
-        // A handful of newly revealed rows, not the 65,536-row backing store.
-        Assert.True(
-            view.IndexerReads is > 0 and < 100,
-            $"expected a bounded number of indexer reads after one small scroll, got {view.IndexerReads}. " +
-            $"scrollbar value {valueBefore} -> {verticalScrollBar.Value} (max={verticalScrollBar.Maximum})");
+            // A handful of newly revealed rows, not the 65,536-row backing store.
+            Assert.True(
+                view.IndexerReads is > 0 and < 100,
+                $"expected a bounded number of indexer reads after one small scroll, got {view.IndexerReads}. " +
+                $"scrollbar value {valueBefore} -> {verticalScrollBar.Value} (max={verticalScrollBar.Maximum})");
 
-        window.Close();
+            window.Close();
+        });
     }
 
     [Fact]
     public void Selection_survives_a_forced_reset_by_object_identity()
     {
-        var view = BuildPopulatedView(SyntheticRowCount);
-        var grid = BuildGrid(view);
-        var window = new Window { Content = grid, Width = 800, Height = 400 };
+        // See Initial_bind_does_not_materialize_the_backing_store's remarks on why this
+        // wrapper is required, not optional.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var view = BuildPopulatedView(SyntheticRowCount);
+            var grid = BuildGrid(view);
+            var window = new Window { Content = grid, Width = 800, Height = 400 };
 
-        window.Show();
-        HeadlessFixture.Pump();
+            window.Show();
+            HeadlessFixture.Pump();
 
-        // Row 150,000 (by append order) sits at a fixed offset from the window base once
-        // the ring is full and no longer growing.
-        const long targetSequence = 150_000;
-        var windowBase = view.TotalAppended - view.Count;
-        var targetIndex = (int)(targetSequence - windowBase);
+            // Row 150,000 (by append order) sits at a fixed offset from the window base once
+            // the ring is full and no longer growing.
+            const long targetSequence = 150_000;
+            var windowBase = view.TotalAppended - view.Count;
+            var targetIndex = (int)(targetSequence - windowBase);
 
-        var selectedVm = (MessageRowViewModel)view[targetIndex]!;
-        view.SetSelected(selectedVm);
-        grid.SelectedItem = selectedVm;
-        HeadlessFixture.Pump();
+            var selectedVm = (MessageRowViewModel)view[targetIndex]!;
+            view.SetSelected(selectedVm);
+            grid.SelectedItem = selectedVm;
+            HeadlessFixture.Pump();
 
-        Assert.Same(selectedVm, grid.SelectedItem);
+            Assert.Same(selectedVm, grid.SelectedItem);
 
-        view.ForceReset();
-        HeadlessFixture.Pump();
+            view.ForceReset();
+            HeadlessFixture.Pump();
 
-        Assert.Same(selectedVm, grid.SelectedItem);
-        Assert.Equal(targetSequence, selectedVm.Sequence);
+            Assert.Same(selectedVm, grid.SelectedItem);
+            Assert.Equal(targetSequence, selectedVm.Sequence);
 
-        window.Close();
+            window.Close();
+        });
     }
 }
