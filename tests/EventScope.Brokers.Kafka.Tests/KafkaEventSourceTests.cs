@@ -132,6 +132,42 @@ public sealed class KafkaEventSourceTests
         Assert.NotEqual(configs[0].GroupId, configs[1].GroupId);
     }
 
+    [Fact]
+    public async Task No_partition_set_subscribes_to_the_whole_topic()
+    {
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            Partition = null,
+        });
+        fake.Enqueue(MakeResult());
+
+        await RunOneMessageAsync(source, Ct);
+
+        Assert.Equal(["orders"], fake.SubscribedTopics);
+        Assert.Empty(fake.AssignedPartitions);
+    }
+
+    [Fact]
+    public async Task An_explicit_partition_assigns_instead_of_subscribing()
+    {
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            Partition = 3,
+        });
+        fake.Enqueue(MakeResult(partition: 3));
+
+        await RunOneMessageAsync(source, Ct);
+
+        Assert.Empty(fake.SubscribedTopics);
+        var assigned = Assert.Single(fake.AssignedPartitions);
+        Assert.Equal("orders", assigned.Topic);
+        Assert.Equal(3, assigned.Partition.Value);
+    }
+
     // --- Mapping rules ---
 
     [Fact]

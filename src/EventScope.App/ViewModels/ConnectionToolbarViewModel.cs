@@ -26,4 +26,20 @@ public partial class ConnectionToolbarViewModel : ObservableObject
 
     [ObservableProperty]
     public partial double MessagesPerSecond { get; set; }
+
+    /// <summary>The selected tab's connection name (UI spec §4.2 source selector) — set
+    /// whenever the active tab changes, independent of whether it's currently streaming, so
+    /// the toolbar always shows what's selected.</summary>
+    [ObservableProperty]
+    public partial string ConnectionName { get; set; } = string.Empty;
+
+    /// <summary>The selected tab's topic(s), Kafka only — empty for the Fake source.</summary>
+    [ObservableProperty]
+    public partial string TopicLabel { get; set; } = string.Empty;
+
+    /// <summary>"partition N", or empty when the connection consumes every partition. A
+    /// plain read-only label rather than a live broker-fetched dropdown — see
+    /// ConnectionManagerViewModel's own scoping note on <c>EditPartitionText</c>.</summary>
+    [ObservableProperty]
+    public partial string PartitionLabel { get; set; } = string.Empty;
 }

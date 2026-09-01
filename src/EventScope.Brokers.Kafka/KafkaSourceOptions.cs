@@ -22,6 +22,13 @@ public sealed record KafkaSourceOptions
 
     public AutoOffsetReset AutoOffsetReset { get; init; } = AutoOffsetReset.Latest;
 
+    /// <summary>When set, the source <c>Assign</c>s to this partition of <see cref="Topics"/>
+    /// instead of <c>Subscribe</c>-ing to the whole topic — <see langword="null"/> (the
+    /// default) means all partitions. Requires exactly one topic in <see cref="Topics"/>;
+    /// assigning one partition number across several differently-partitioned topics has no
+    /// single sensible meaning.</summary>
+    public int? Partition { get; init; }
+
     /// <summary>How long <c>Consume</c> blocks per poll before returning null so the loop can
     /// recheck cancellation. Short enough for shutdown to feel responsive, long enough that
     /// idle polling isn't a busy loop.</summary>

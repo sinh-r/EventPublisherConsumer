@@ -87,7 +87,19 @@ public sealed class KafkaEventSource : IEventSource
 
         try
         {
-            consumer.Subscribe(_options.Topics);
+            if (_options.Partition is { } partition)
+            {
+                // Assign, not Subscribe: an explicit partition means the caller wants exactly
+                // that partition's messages, not whatever the group-rebalance protocol would
+                // hand this throwaway group. Confluent.Kafka.AutoOffsetReset still governs the
+                // starting position, since a throwaway group has no committed offset to resume
+                // from either way.
+                consumer.Assign(_options.Topics.Select(t => new TopicPartition(t, new Partition(partition))));
+            }
+            else
+            {
+                consumer.Subscribe(_options.Topics);
+            }
 
             var timeoutMs = (int)_options.ConsumeTimeout.TotalMilliseconds;
 
@@ -123,8 +135,14 @@ public sealed class KafkaEventSource : IEventSource
         {
             // Close() (not just Dispose()) lets the group leave cleanly instead of waiting
             // out the broker's session timeout — safe to call here since the consume loop
-            // has stopped calling Consume() by this point.
-            try { consumer.Close(); }
+            // has stopped calling Consume() by this point. Bounded to 2s: measured directly
+            // against a bootstrap host that was never reachable, Close() can block far longer
+            // than that trying to negotiate a graceful leave that can never succeed, which
+            // held the whole app's shutdown hostage. On timeout the close attempt is simply
+            // abandoned — DisposeAsync's own consumer.Dispose() still runs the real cleanup,
+            // and a stray, already-abandoned Close() finishing later on a background thread is
+            // harmless for a handle that's being torn down either way.
+            try { Task.Run(() => consumer.Close()).Wait(TimeSpan.FromSeconds(2)); }
             catch { /* best-effort on shutdown */ }
         }
     }

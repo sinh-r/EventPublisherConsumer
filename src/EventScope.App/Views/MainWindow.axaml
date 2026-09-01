@@ -5,6 +5,7 @@
         xmlns:vm="using:EventScope.App.ViewModels"
         xmlns:views="using:EventScope.App.Views"
         xmlns:publisher="using:EventScope.App.Publisher"
+        xmlns:conv="using:Avalonia.Data.Converters"
         mc:Ignorable="d" d:DesignWidth="1600" d:DesignHeight="1000"
         x:Class="EventScope.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -36,6 +37,17 @@
         <Style Selector="TextBlock.punct">
             <Setter Property="Foreground" Value="{DynamicResource Muted}" />
         </Style>
+
+        <!-- Tab strip active-tab underline (UI spec §4.1) - a declarative Classes binding on
+             ConnectionTabViewModel.IsSelected, the same safe pattern already proven for the
+             message grid's .large/.searchHit cells rather than an imperative Classes.Set. -->
+        <Style Selector="Border.tabItem">
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Border.tabItem.active">
+            <Setter Property="Background" Value="{DynamicResource Surf}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+        </Style>
     </Window.Styles>
 
     <Grid>
@@ -59,18 +71,57 @@
             <RowDefinition Height="28" />
         </Grid.RowDefinitions>
 
-        <!-- Tab strip (§4.1 of the UI spec). One always-present tab for the fake source;
-             the connection manager and multi-connection tabs are Stage 5. -->
+        <!-- Tab strip (§4.1 of the UI spec). One tab per connection opened this session (not
+             one per view - a connection tab, per the spec's own wording) plus a trailing +
+             that reopens the connection manager / launcher overlay below. -->
         <Border Grid.Row="0" Background="{DynamicResource Bg}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Height="36">
-                <Border Background="{DynamicResource Surf}"
-                        BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,2"
-                        Padding="14,0">
-                    <TextBlock Text="Live (Fake source)" VerticalAlignment="Center"
-                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
-                               Foreground="{DynamicResource Text}" />
-                </Border>
+            <StackPanel Orientation="Horizontal" Height="36" x:CompileBindings="False">
+                <ItemsControl ItemsSource="{Binding Tabs}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Classes="tabItem" Classes.active="{Binding IsSelected}"
+                                    BorderThickness="0,0,0,2" Padding="12,0" Height="36">
+                                <Grid ColumnDefinitions="Auto,Auto,Auto">
+                                    <Button Grid.ColumnSpan="2" Grid.Column="0"
+                                            Command="{Binding $parent[Window].DataContext.SelectTabCommand}"
+                                            CommandParameter="{Binding}"
+                                            Background="Transparent" BorderThickness="0" Padding="0"
+                                            HorizontalContentAlignment="Left">
+                                        <Grid ColumnDefinitions="Auto,Auto">
+                                            <Panel Grid.Column="0" Width="6" Height="6" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <Ellipse Fill="{DynamicResource Green}" IsVisible="{Binding IsStreaming}" />
+                                                <Ellipse Fill="{DynamicResource Amber}" IsVisible="{Binding IsDegraded}" />
+                                                <Ellipse Fill="{DynamicResource Red}" IsVisible="{Binding IsError}" />
+                                                <Ellipse Fill="{DynamicResource Dim}" IsVisible="{Binding IsIdle}" />
+                                            </Panel>
+                                            <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"
+                                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                                                       Foreground="{DynamicResource Text}" />
+                                        </Grid>
+                                    </Button>
+                                    <Button Grid.Column="2" Content="×" Margin="8,0,0,0"
+                                            Command="{Binding $parent[Window].DataContext.CloseTabCommand}"
+                                            CommandParameter="{Binding}"
+                                            Width="16" Height="16" Padding="0" VerticalAlignment="Center"
+                                            Background="Transparent" BorderThickness="0"
+                                            Foreground="{DynamicResource Dim}" FontSize="12" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Button Content="+" Command="{Binding ToggleConnectionManagerCommand}"
+                        Width="36" Height="36" Padding="0"
+                        Background="Transparent" BorderThickness="0"
+                        Foreground="{DynamicResource Muted}" FontSize="16"
+                        ToolTip.Tip="Add connection" />
             </StackPanel>
         </Border>
 
@@ -83,9 +134,24 @@
                     <Ellipse Fill="{DynamicResource Dim}" IsVisible="{Binding !Toolbar.IsRunning}" />
                 </Panel>
 
-                <TextBlock Grid.Column="1" Text="{Binding Toolbar.StatusLabel}"
-                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
-                           Foreground="{DynamicResource Text}" Margin="0,0,16,0" />
+                <!-- Source selector display (UI spec §4.2: "Shows broker type icon-glyph,
+                     then topic-name"). A read-only label, not a live dropdown - the
+                     connection to show here is chosen via the tab strip and the connection
+                     manager, not from within the toolbar itself. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="0,0,16,0">
+                    <TextBlock Text="{Binding Toolbar.ConnectionName}"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                               Foreground="{DynamicResource Text}" />
+                    <TextBlock Text="{Binding Toolbar.TopicLabel}" IsVisible="{Binding Toolbar.TopicLabel, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                               FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource Muted}" />
+                    <TextBlock Text="{Binding Toolbar.PartitionLabel}" IsVisible="{Binding Toolbar.PartitionLabel, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                               FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource Dim}" />
+                    <TextBlock Text="{Binding Toolbar.StatusLabel}"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource Muted}" />
+                </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
                     <Button Content="Start" Command="{Binding ToggleRunCommand}"
@@ -101,12 +167,25 @@
                 </StackPanel>
 
                 <!-- Capability-bound indicator, not a broker-type switch: every element here
-                     reads a SourceCapabilities flag. The full segmented-control widget and
-                     its exact styling is Stage 5 polish; this is the M1a stand-in. -->
+                     reads a SourceCapabilities flag. -->
                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="8" Margin="0,0,16,0">
-                    <TextBlock Text="peek" IsVisible="{Binding Toolbar.CanPeekNonDestructively}"
-                               FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
-                               Foreground="{DynamicResource Muted}" />
+                    <!-- Read-mode segmented control (UI spec §4.2). Consume is permanently
+                         disabled here: KafkaSourceOptions deliberately forbids a fixed
+                         consumer group id (see its own remarks) - a real committing "Consume"
+                         mode would need one, and that is exactly the property that keeps this
+                         tool from disturbing a real consumer group's offsets. Reversing that
+                         is a deliberate decision for later, not assumed by this pass. -->
+                    <Border BorderBrush="{DynamicResource Accent}" BorderThickness="1" CornerRadius="5"
+                            Background="{DynamicResource AccentTint}" Padding="10,4">
+                        <TextBlock Text="Peek" Foreground="{DynamicResource Accent}"
+                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                    </Border>
+                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="5"
+                            Padding="10,4" Opacity="0.4"
+                            ToolTip.Tip="Not available — this tool never uses a fixed consumer group id, to avoid disturbing a real consumer group's offsets.">
+                        <TextBlock Text="Consume" Foreground="{DynamicResource Text}"
+                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                    </Border>
                     <TextBlock Text="partitioned" IsVisible="{Binding Toolbar.SupportsPartitions}"
                                FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
                                Foreground="{DynamicResource Muted}" />
@@ -133,13 +212,33 @@
         </Border>
 
         <!-- Warning banner. Collapses naturally when the connected source can peek
-             non-destructively (true for FakeEventSource); reachable once SQS lands in M4. -->
+             non-destructively (true for FakeEventSource and Kafka - unreachable until SQS
+             lands in M4) - and the connection-error banner (UI spec §10's Error state: "Red
+             tab dot, banner with broker error text, retry button"). Both bound independently
+             in the same row rather than merged into one computed banner: no source in this
+             pass can ever be both peek-incapable and errored at once (only Kafka and Fake
+             exist, and Kafka.CanPeekNonDestructively is always true), so the two conditions
+             are mutually exclusive in practice today. -->
         <Border Grid.Row="2" Height="36" Background="{DynamicResource AmberTint}"
                 BorderBrush="{DynamicResource Amber}" BorderThickness="0,0,0,1" Padding="14,0"
                 IsVisible="{Binding !Toolbar.CanPeekNonDestructively}">
             <TextBlock Text="This source cannot peek non-destructively — consuming removes messages."
                        VerticalAlignment="Center" Foreground="{DynamicResource Amber}"
                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+        </Border>
+        <Border Grid.Row="2" Height="36" Background="{DynamicResource RedTint}"
+                BorderBrush="{DynamicResource Red}" BorderThickness="0,0,0,1" Padding="14,0"
+                IsVisible="{Binding HasConnectionError}">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding ConnectionErrorText}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource Red}"
+                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                <Button Grid.Column="1" Content="Retry" Command="{Binding RetryCommand}"
+                        Background="Transparent" BorderBrush="{DynamicResource Red}"
+                        Foreground="{DynamicResource Red}" Padding="10,3"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+            </Grid>
         </Border>
 
         <!-- Search bar. Two tiers wired here (build plan §5 M2): the instant ring filter
@@ -588,6 +687,251 @@
                            FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
                            Foreground="{DynamicResource Muted}"
                            Text="{Binding StatusBar.ByteBudgetUsed, StringFormat='{}{0:N0} bytes'}" />
+            </Grid>
+        </Border>
+
+        <!-- Connection manager / launcher (UI spec §6). Same overlay pattern as the settings
+             panel below - a Panel+Border pair in the root grid, not a separate Window or
+             UserControl, since this app has no window-management story yet and Settings
+             already established the pattern for a modal-shaped surface here. Auto-opened at
+             cold start (MainWindowViewModel's constructor) so it doubles as the launcher; the
+             tab strip's + and Connect Stage-5-per-spec both reopen it later. -->
+        <Panel Grid.Row="0" Grid.RowSpan="9" IsVisible="{Binding IsConnectionManagerOpen}"
+               Background="#0A0B12" Opacity="0.58" />
+        <Border Grid.Row="0" Grid.RowSpan="9" IsVisible="{Binding IsConnectionManagerOpen}"
+                Width="860" Height="580" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="{DynamicResource Raise}" CornerRadius="8"
+                BoxShadow="0 24 60 0 #80000000"
+                x:CompileBindings="False">
+            <Grid RowDefinitions="Auto,*">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="20,16,16,10">
+                    <TextBlock Grid.Column="0" Text="Connections" FontFamily="{DynamicResource SansFontFamily}"
+                               FontSize="14" FontWeight="Medium" Foreground="{DynamicResource Text}" />
+                    <Button Grid.Column="1" Content="Close"
+                            Command="{Binding ToggleConnectionManagerCommand}"
+                            Background="Transparent" BorderBrush="{DynamicResource Line}"
+                            Foreground="{DynamicResource Text}" Padding="12,4"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                </Grid>
+
+                <Grid Grid.Row="1" ColumnDefinitions="280,*">
+                    <!-- Left: saved connections list (UI spec §6). Grouping by broker type is
+                         cosmetic and deferred to Stage 5 polish - today there is exactly one
+                         real broker kind (Kafka) plus the built-in Fake source, so a flat list
+                         with each row's own Kind label carries the same information. -->
+                    <Border Grid.Column="0" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,1,0">
+                        <ScrollViewer>
+                            <ItemsControl ItemsSource="{Binding ConnectionManager.SavedConnections}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid ColumnDefinitions="*,Auto,Auto" Margin="16,10">
+                                            <Grid.Styles>
+                                                <Style Selector="Grid:pointerover">
+                                                    <Setter Property="Background" Value="{DynamicResource Hover}" />
+                                                </Style>
+                                            </Grid.Styles>
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding Name}"
+                                                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                                                           Foreground="{DynamicResource Text}" />
+                                                <TextBlock Text="{Binding EndpointDisplay}" TextTrimming="CharacterEllipsis"
+                                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11"
+                                                           Foreground="{DynamicResource Muted}" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="Connect"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.ConnectionManager.ConnectCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="6,0,0,0" Height="24" Padding="9,0"
+                                                    Background="Transparent" BorderBrush="{DynamicResource Accent}"
+                                                    Foreground="{DynamicResource Accent}"
+                                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="11.5" />
+                                            <Button Grid.Column="2" Content="Edit"
+                                                    IsVisible="{Binding IsEditable}"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.ConnectionManager.EditConnectionCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="6,0,0,0" Height="24" Padding="9,0"
+                                                    Background="Transparent" BorderBrush="{DynamicResource Line}"
+                                                    Foreground="{DynamicResource Text}"
+                                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="11.5" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Right: the Kafka editor form when adding/editing, else an empty state
+                         with three large broker buttons (UI spec §6). ASB/SQS render disabled
+                         with a tooltip - the capability-gated-control wrapper from §9 - since
+                         those sources don't exist until M4, not hidden outright. -->
+                    <Grid Grid.Column="1" IsVisible="{Binding !ConnectionManager.IsEditing}"
+                          RowDefinitions="*" Margin="20">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="14">
+                            <TextBlock Text="Add a connection" HorizontalAlignment="Center"
+                                       FontFamily="{DynamicResource SansFontFamily}" FontSize="13"
+                                       Foreground="{DynamicResource Dim}" />
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Content="Kafka" Command="{Binding ConnectionManager.NewKafkaConnectionCommand}"
+                                        Width="140" Height="72"
+                                        Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Accent}"
+                                        Foreground="{DynamicResource Accent}"
+                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="13" />
+                                <Button Content="Azure Service Bus" Width="140" Height="72" IsEnabled="False"
+                                        Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                                        Foreground="{DynamicResource Text}" Opacity="0.4"
+                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="13"
+                                        ToolTip.Tip="Available in a future milestone (M4)." />
+                                <Button Content="AWS SQS" Width="140" Height="72" IsEnabled="False"
+                                        Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                                        Foreground="{DynamicResource Text}" Opacity="0.4"
+                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="13"
+                                        ToolTip.Tip="Available in a future milestone (M4)." />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Grid.Column="1" IsVisible="{Binding ConnectionManager.IsEditing}"
+                          RowDefinitions="*,Auto" Margin="20,16,20,16">
+                        <ScrollViewer Grid.Row="0">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="KAFKA CONNECTION" FontFamily="{DynamicResource SansFontFamily}"
+                                           FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="NAME" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                    <TextBox Text="{Binding ConnectionManager.EditName, Mode=TwoWay}"
+                                             Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                             FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="BOOTSTRAP SERVERS" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                    <TextBox Text="{Binding ConnectionManager.EditBootstrapServers, Mode=TwoWay}" Watermark="broker1:9092,broker2:9092"
+                                             Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                             FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                </StackPanel>
+
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="TOPICS (COMMA-SEPARATED)" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditTopics, Mode=TwoWay}"
+                                                 Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="PUBLISH TOPIC" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditPublishTopic, Mode=TwoWay}" Watermark="defaults to first topic"
+                                                 Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="CONSUMER GROUP PREFIX" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditGroupIdPrefix, Mode=TwoWay}"
+                                                 Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="PARTITION (BLANK = ALL)" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditPartitionText, Mode=TwoWay}"
+                                                 Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="SECURITY PROTOCOL" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <ComboBox ItemsSource="{x:Static vm:ConnectionManagerViewModel.SecurityProtocolOptions}"
+                                                  SelectedItem="{Binding ConnectionManager.EditSecurityProtocol, Mode=TwoWay}"
+                                                  HorizontalAlignment="Stretch"
+                                                  Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                  FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="SASL MECHANISM" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <ComboBox ItemsSource="{x:Static vm:ConnectionManagerViewModel.SaslMechanismOptions}"
+                                                  SelectedItem="{Binding ConnectionManager.EditSaslMechanism, Mode=TwoWay}"
+                                                  HorizontalAlignment="Stretch"
+                                                  Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                  FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="SASL USERNAME" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditSaslUsername, Mode=TwoWay}"
+                                                 Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="SASL PASSWORD" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditSaslPasswordInput, Mode=TwoWay}" PasswordChar="•"
+                                                 Watermark="{Binding ConnectionManager.PasswordWatermark}"
+                                                 Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="SSL CA LOCATION (OPTIONAL)" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                    <TextBox Text="{Binding ConnectionManager.EditSslCaLocation, Mode=TwoWay}"
+                                             Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}"
+                                             FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding ConnectionManager.ValidationError}"
+                                           IsVisible="{Binding ConnectionManager.HasValidationError}"
+                                           FontFamily="{DynamicResource SansFontFamily}" FontSize="11.5"
+                                           Foreground="{DynamicResource Red}" TextWrapping="Wrap" />
+
+                                <!-- Test connection: idle / spinner / result, per UI spec §6.
+                                     A text status stands in for an animated spinner control -
+                                     this codebase has none yet (see the search bar's own
+                                     text-only "index catching up" indicator for the same
+                                     proportionality call). -->
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <Button Grid.Column="0" Content="Test connection"
+                                            Command="{Binding ConnectionManager.TestConnectionCommand}"
+                                            Background="Transparent" BorderBrush="{DynamicResource Line}"
+                                            Foreground="{DynamicResource Text}" Padding="10,4"
+                                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                                    <TextBlock Grid.Column="1" Text="Testing…" IsVisible="{Binding ConnectionManager.IsTesting}"
+                                               Margin="10,0,0,0" VerticalAlignment="Center"
+                                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12"
+                                               Foreground="{DynamicResource Muted}" />
+                                </Grid>
+                                <TextBlock Text="{Binding ConnectionManager.TestResultText}" TextWrapping="Wrap"
+                                           IsVisible="{Binding ConnectionManager.IsTestSuccess}"
+                                           Foreground="{DynamicResource Green}"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5" />
+                                <TextBlock Text="{Binding ConnectionManager.TestResultText}" TextWrapping="Wrap"
+                                           IsVisible="{Binding ConnectionManager.IsTestFailure}"
+                                           Foreground="{DynamicResource Red}"
+                                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5" />
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,10,0,0">
+                            <Button Content="Cancel" Command="{Binding ConnectionManager.CancelEditCommand}"
+                                    Background="Transparent" BorderBrush="{DynamicResource Line}"
+                                    Foreground="{DynamicResource Text}" Padding="12,4"
+                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                            <Button Content="Delete" IsVisible="{Binding ConnectionManager.IsEditingExisting}"
+                                    Command="{Binding ConnectionManager.DeleteEditingConnectionCommand}"
+                                    Background="Transparent" BorderBrush="{DynamicResource Red}"
+                                    Foreground="{DynamicResource Red}" Padding="12,4"
+                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                            <Button Content="Save" Command="{Binding ConnectionManager.SaveCommand}"
+                                    Background="Transparent" BorderBrush="{DynamicResource Accent}"
+                                    Foreground="{DynamicResource Accent}" Padding="12,4"
+                                    FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
             </Grid>
         </Border>
 

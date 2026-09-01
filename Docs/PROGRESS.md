@@ -1284,6 +1284,167 @@ the real running app.
 
 ---
 
+## Stage 5a — connection manager and launcher (this pass)
+
+**Reprioritised at your direction**: Kafka being fully functional end-to-end, with no
+environment variables, took priority over M4 (Service Bus/SQS — both still empty project
+shells) and over the heap-growth remainder above (explicitly deferred, unchanged). This pulls
+forward the build plan's Stage 5 connection manager and launcher (§5, UI spec §6) — exactly
+what `EventSourceFactory`'s own M1c-era comment called itself "the stand-in for."
+
+**Pre-step**: the uncommitted broker-neutral refactor already sitting in the tree
+(`SourceError` moved into `Core.Abstractions`, `IEventSource.DisplayName`/`ErrorOccurred`,
+`MainWindowViewModel`'s `if (source is KafkaEventSource)` removed) was verified building and
+green (195/195) and committed on its own first — this pass's connection manager builds
+directly on it.
+
+**`EventScope.App/Connections/`** (new): `ConnectionProfile` — a plain, JSON-serializable
+model whose Kafka fields mirror `KafkaSourceOptions`/`KafkaSinkOptions` field-for-field (this
+is the form data those get built from, not a new shape); `SecurityProtocol`/`SaslMechanism`
+are stored as the target enum's member name string, not the enum itself, so the model has zero
+dependency on `Confluent.Kafka` and room for ASB/SQS fields later without pulling in every
+broker SDK. `ConnectionKind.Fake` has a fixed `Guid.Empty` id (`FakeSourceId`) and is never
+persisted — every consumer of the saved list gets it prepended in memory instead.
+`ConnectionStore` persists the rest as plain JSON under
+`%LOCALAPPDATA%\EventScope\connections.json`, copying `AppSettings.Load`'s exact
+fallback-to-defaults-on-any-failure contract.
+
+**`ConnectionSecretProtector`** — DPAPI (`ProtectedData`, `CurrentUser` scope), so a saved
+SASL password is never plaintext on disk. New package:
+`System.Security.Cryptography.ProtectedData` 10.0.11 (matching `Microsoft.Data.Sqlite`'s own
+pinned version). `CA1416` (the platform-compat analyzer) fires on the `ProtectedData` calls
+since this project targets plain `net10.0`, not `net10.0-windows`; suppressed locally with a
+one-line pragma rather than retargeting the whole App project, since the type's own
+`catch (PlatformNotSupportedException)` is already the cross-platform guard the analyzer wants,
+just expressed at runtime instead of compile time.
+
+**`KafkaConnectionTester`** (`EventScope.Brokers.Kafka/`) — `AdminClientBuilder` +
+`GetMetadata(timeout)`, per the build plan's own Stage 5 note. Seeded for tests via a
+`MetadataFetcher` delegate returning a real `Confluent.Kafka.Metadata` — confirmed by
+reflection *before* writing the seam that `Metadata`/`BrokerMetadata`/`TopicMetadata`/
+`PartitionMetadata` are all plain, publicly-constructible types, so no fake for the 20-member
+`IAdminClient` interface was needed at all. **Stated deviation from the UI spec's literal
+wording**: §6 asks for "broker version detected"; librdkafka's admin metadata exposes the
+*client* library's version (`Library.VersionString`), not the broker's — reported as such, not
+silently reworded.
+
+**Partition targeting is a real `KafkaEventSource` change**, not just a form field:
+`KafkaSourceOptions.Partition` (new, nullable) routes to `consumer.Assign(TopicPartition)`
+instead of `consumer.Subscribe(topics)` when set. `FakeKafkaConsumer.Assign(IEnumerable<TopicPartition>)`
+— previously one of the fake's "never touched" members throwing `NotSupportedException` — now
+actually tracks assignments, since this pass is the first code to exercise that path.
+
+**`ConnectionManagerViewModel` + the launcher overlay in `MainWindow.axaml`** — UI spec §6's
+two panes (saved connections left, editor right), built as a `Panel`+`Border` overlay in the
+root grid exactly like the existing Settings overlay, not a new `Window` or `UserControl` —
+this app has no window-management story and Settings already established the pattern. The
+empty state's three broker buttons render Kafka enabled and ASB/SQS disabled-with-tooltip (§9's
+capability-gated-control wrapper), since those sources don't exist until M4. "Test connection"
+is idle/testing/result text — no animated spinner, this codebase has none yet, the same
+proportionality call as the search bar's own text-only "index catching up" indicator. A saved
+connection's password field is always blank when reopened for editing, and a blank Save leaves
+the stored password untouched — retyping is the only way to change it, the same UX as any
+credential manager.
+
+**Tab strip rebuilt** (`MainWindow.axaml`) from one hardcoded "Live (Fake source)" label into
+an `ItemsControl` over `MainWindowViewModel.Tabs`, each with a status dot (green streaming /
+grey idle / amber degraded / red error — UI spec §4.1), a close ×, and a declarative
+`Classes.active` binding for the underline (the same safe pattern as the message grid's
+`.large`/`.searchHit` cells, not the imperative `Classes.Set` path the M1-remainder pass found
+expensive). New `ConnectionTabViewModel`.
+
+**One connection actually running at a time — a deliberate, documented scope boundary, not an
+oversight**: selecting a different tab stops whichever pipeline is live before anything about
+the new tab starts (`MainWindowViewModel.HandleTabSwitchAsync`). Concurrent per-tab pipelines
+would need one `MessageRowsView` ring per tab (~20 MB each, build plan §3.1) and
+shared-`SessionStore` write routing under §3.6's collision #1 — real scope for a separate pass.
+
+**Storage is namespaced per connection** — `SessionRootDirectory(profileId)` puts each
+non-Fake connection's day files under its own `sessions/{profileId}/` subdirectory, so two
+Kafka topics never land in the same SQLite file. The Fake source and the legacy env-var path
+(`profileId == null`) both keep the *exact* original unnamespaced `sessions/` path, confirmed
+against this machine's own pre-existing `sessions/2026-08-31/` directory from a prior run —
+nothing on disk from before this pass is orphaned.
+
+**A real bug caught before it shipped, by reasoning through the design, not by a failing
+test**: the publisher panel's `IEventSink` was cached forever
+(`_sink ??= EventSinkFactory.Create(...)`), a fine assumption when only one connection could
+ever exist (M3's own design) but wrong now — switching Kafka connections while the publisher
+panel was open would keep silently publishing to the *previous* connection's topic. Fixed by
+tearing the sink down alongside the session store on every real tab switch
+(`HandleTabSwitchAsync`), so the provider lazily rebuilds it against whatever's actually
+selected.
+
+**Read-mode segmented control renders `Consume` permanently disabled** — a stated assumption,
+not an inferred one: `KafkaSourceOptions` deliberately forbids a fixed consumer group id (see
+its own remarks), which a real committing "Consume" mode would need, and that is exactly the
+property keeping this tool from disturbing a real consumer group's offsets. Reversing it is a
+decision for later.
+
+**A genuine shutdown-hang bug, found only by manually driving the real app** (this codebase's
+established UI-Automation recipe), not by any unit test: closing the app, or switching away
+from a connection, after it had ever pointed `KafkaEventSource` at an unreachable broker took
+15+ seconds and had to be force-killed. Root cause: the consume loop's `finally` block calls
+`consumer.Close()` unconditionally to let a real group leave cleanly — a reasonable assumption
+when the broker is reachable, but against one that never was, `Close()` can block for a long
+time negotiating a graceful leave that can never succeed. Fixed by bounding it:
+`Task.Run(() => consumer.Close()).Wait(TimeSpan.FromSeconds(2))`, abandoning the attempt on
+timeout rather than blocking the dedicated consume thread — and therefore the whole app's
+shutdown — on a broker that was never there. Measured directly, same repro, same machine:
+shutdown after Stop against a bogus bootstrap host went from a 15s timeout + force-kill to
+**0.097 seconds**.
+
+**Manually verified against the real running app**, via this codebase's established Windows UI
+Automation recipe (PowerShell, `FindFirst` by accessible `Name`, `InvokePattern`) — not just
+green tests: cold launch shows the launcher overlay with the Fake source and the three broker
+buttons; added a Kafka connection with a deliberately bogus bootstrap host; "Test connection"
+correctly failed with the real librdkafka reason text ("Local: Broker transport failure")
+after its full timeout, not a crash or a hang; saved it; connected it from the launcher, which
+opened a second tab and closed the overlay; Start surfaced "Kafka error: 1/1 brokers are down"
+in the toolbar without crashing the process (a non-fatal transport error, matching
+`KafkaEventSource`'s documented behaviour); switched back to the Fake source tab, which
+correctly tore down and restarted a fresh pipeline and streamed normally
+(`Streaming (Fake source)`, ~9,700–11,200 msg/s, real rows visible in the grid); Stop, then
+window-close, exited in ~0.1s. Also re-verified `EVENTSCOPE_MEASURE` mode directly (not through
+the full acceptance script): the launcher overlay never blocks it, and a 5s run auto-started,
+streamed, and wrote its frame-time CSV exactly as before this pass.
+
+**Also confirmed, not newly caused**: a freshly rebuilt `EventScope.App` Release output can
+still be blocked by Smart App Control the same way M1a first found (Code Integrity, this pass
+hit it against `EventScope.Brokers.Kafka.dll` specifically) — signing the output directory with
+the existing local dev cert (`build/Sign-LocalTestBinary.ps1`, pointed at the App's own
+`bin/Release/net10.0`, not just a test project's) resolved it identically. Same pre-existing
+issue as PROGRESS.md's Blocked item 2, not something this pass introduced.
+
+Tests: 233, up from 195 — 38 new. `ConnectionStoreTests` (×4) and `ConnectionSecretProtectorTests`
+(×4) in `EventScope.App.Tests` (JSON round-trip including every Kafka field, corrupt-file
+fallback, DPAPI round-trip, the protected value never containing the plaintext, unprotecting a
+null/corrupt value failing without throwing). `EventSourceFactoryTests`/`EventSinkFactoryTests`
+(×9) — every form field's mapping onto `KafkaSourceOptions`/`KafkaSinkOptions`, including the
+whitespace-trimming and blank-field-fallback rules, and `NotSupportedException` for ASB/SQS
+kinds. `ConnectionManagerViewModelTests` (×15) — the Fake source always present/non-editable/
+first, validation blocking Save and Test alike, new-vs-edit password handling, delete guards,
+the injected-tester success/failure paths, and last-used reordering with a fake `TimeProvider`.
+`KafkaConnectionTesterTests` (×5) in `EventScope.Brokers.Kafka.Tests` — reachable/unreachable/
+unknown-topic, cluster-only (no topic), and security/SASL options reaching the admin config.
+`KafkaEventSourceTests` (×2 new) — explicit-partition `Assign` versus whole-topic `Subscribe`,
+needing `FakeKafkaConsumer.Assign(IEnumerable<TopicPartition>)` to actually track assignments
+instead of throwing.
+
+**One test written, then deleted for testing the wrong layer**: a first draft of
+`ConnectionStoreTests` asserted `ConnectionStore.Save` itself filters out the Fake source —
+it doesn't; only `ConnectionManagerViewModel.Persist()` does that, before ever calling into the
+store. The store is (deliberately) a dumb JSON reader/writer with no Fake-source awareness at
+all. Caught immediately by the test itself failing; fixed by removing the wrong test rather
+than adding filtering logic to a layer that shouldn't have it — the real contract is already
+covered where it actually lives (`Saving_a_valid_new_connection_inserts_it_first_and_persists_without_the_fake_source`).
+
+**Explicitly not in this pass** (see the updated Pending list below): the ASB/SQS editor forms
+and the M4 capability-binding audit test, the deep-search overlay, large-payload confirmation,
+toast, light theme, full keyboard map, and concurrent multi-connection pipelines.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -1300,12 +1461,18 @@ the real running app.
   tiered search, pinned JSON-field columns, a settings view, and the chaos soak test.
 - **M3 is complete** (see above) — the generator engine, the publisher UI, schema inference
   ("Use as template"), and the publish path (`KafkaEventSink`, opt-in round-trip acceptance
-  test) are all done. `Publish`/`Burst` report "no publish target connected" until
-  `EVENTSCOPE_KAFKA_BOOTSTRAP` is set, by design.
+  test) are all done. `Publish`/`Burst` report "no publish target connected" for the Fake
+  source or when no connection is selected; a connected Kafka tab (via the connection
+  manager, Stage 5a above) publishes for real.
 - **M4 — Service Bus and SQS.** `ServiceBusEventSource`, `SqsEventSource`, and the
-  capability-binding audit (no `if (broker == …)` in the view layer).
-- **Stage 5 — polish.** Connection manager + per-broker forms, deep-search overlay,
-  large-payload confirmation, toast, light theme, full keyboard map.
+  capability-binding audit (no `if (broker == …)` in the view layer). The connection
+  manager's empty state already names both and reserves their editor-form slot
+  (disabled with a tooltip) — see Stage 5a above.
+- **Stage 5 — polish, partially done (Stage 5a above).** Connection manager and launcher
+  are done: saved connections, the Kafka editor form, three-state Test connection, the tab
+  strip, per-tab error state with Retry. Still pending: the ASB/SQS editor forms (blocked on
+  M4's sources existing), deep-search overlay, large-payload confirmation, toast, light
+  theme, full keyboard map.
 - **Release engineering — real code signing.** Repo prep, publish config and both CI
   workflows are now done (see above); what remains is the SignPath Foundation application
   and the signing step in `release.yml`, deliberately deferred until v0.1.0 ships at the

@@ -15,6 +15,7 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
     private readonly Lock _gate = new();
     private readonly Queue<ConsumeResult<byte[], byte[]>?> _results = new();
     private readonly List<string> _subscribedTopics = [];
+    private readonly List<TopicPartition> _assignedPartitions = [];
 
     public int ConsumeCallCount { get; private set; }
 
@@ -23,6 +24,11 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
     public bool Disposed { get; private set; }
 
     public IReadOnlyList<string> SubscribedTopics => _subscribedTopics;
+
+    /// <summary>Populated by <see cref="Assign(IEnumerable{TopicPartition})"/> — the explicit
+    /// single-partition path <see cref="KafkaEventSource"/> takes when
+    /// <see cref="KafkaSourceOptions.Partition"/> is set, instead of <see cref="Subscribe(IEnumerable{string})"/>.</summary>
+    public IReadOnlyList<TopicPartition> AssignedPartitions => _assignedPartitions;
 
     /// <summary>Queues a result (or null, simulating a poll timeout) to be returned by the
     /// next <see cref="Consume"/> call.</summary>
@@ -99,7 +105,10 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
 
     public void Assign(IEnumerable<TopicPartitionOffset> partitions) => throw new NotSupportedException();
 
-    public void Assign(IEnumerable<TopicPartition> partitions) => throw new NotSupportedException();
+    public void Assign(IEnumerable<TopicPartition> partitions)
+    {
+        lock (_gate) _assignedPartitions.AddRange(partitions);
+    }
 
     public void IncrementalAssign(IEnumerable<TopicPartitionOffset> partitions) => throw new NotSupportedException();
 
