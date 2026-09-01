@@ -1668,6 +1668,79 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    `release.yml`) added to both workflows so a future occurrence fails within a bounded time
    instead of silently consuming hours — bounds the damage, does not close the race.
 
+   **Root-caused and fixed, 2026-09-01, sixth attempt.** A `SynchronizationContext` posting
+   continuations to a dispatcher nothing ever runs — confirmed against Avalonia 11.3 source,
+   not assumed, and confirmed by reproducing the hang deterministically *before* writing the
+   fix (see Verification below), which none of the five prior attempts had done. The chain:
+
+   1. `HeadlessFixture.EnsureInitialized()` (`tests/EventScope.App.Tests/HeadlessFixture.cs`)
+      calls `AppBuilder...SetupWithoutStarting()`.
+   2. `HeadlessTestApp` derives from `Application`, so setup runs
+      `Application.RegisterServices()`, whose *first line* is
+      `AvaloniaSynchronizationContext.InstallIfNeeded()`.
+   3. `InstallIfNeeded()` — `AutoInstall` defaults to `true` — installs a
+      `SynchronizationContext` via `SetSynchronizationContext(Dispatcher.UIThread.GetContextWithPriority(...))`.
+      `SynchronizationContext.Current` is thread-static, so this lands on whichever thread ran
+      that test class's constructor.
+   4. That context's `Post`/`Send` forward to `Dispatcher.Post`/`Send` — they enqueue onto the
+      dispatcher's job queue.
+   5. `SetupWithoutStarting()` never runs a dispatcher loop by definition. The only pumping in
+      this assembly is the manual `Dispatcher.UIThread.RunJobs()` behind `HeadlessFixture.Pump()`,
+      called only by some tests, at moments of their own choosing.
+   6. So any `await` on a *genuinely* asynchronous task (one that does not complete
+      synchronously — an already-completed `ValueTask`/`Task` never touches the context at all,
+      confirmed directly: `InMemoryPayloadStore.ReadAsync` always returns
+      `ValueTask.FromResult(...)`, which is exactly why `IngestPipelineEndToEndTests`'s own
+      `async Task` test never hung despite an unqualified `await`) that is not
+      `ConfigureAwait(false)`, on the thread that installed the context, posts its continuation
+      to a queue nothing drains — and hangs forever.
+
+   Exactly three classes have both a constructor calling `EnsureInitialized()` *and* an
+   `async Task` test with a genuinely-asynchronous unqualified `await`:
+   `IngestPipelineStorageTests`, `IngestPipelinePreviewTests`, `IngestPipelineEndToEndTests`
+   (the last one only *looks* exposed — see point 6). Which one hung, if any, was pure luck of
+   xUnit's discovery order: whichever class's constructor ran first is the one whose thread got
+   poisoned; a sync-only class running first (e.g. `DataGridVirtualizationSpikeTests`) absorbs
+   the install harmlessly and every later test gets a clean thread — which is what every local
+   run this whole project has ever seen, and exactly why this never reproduced here. This also
+   explains, precisely, why all five prior attempts missed it: one `ConfigureAwait(false)` at a
+   single call site left the test's other unqualified awaits exposed; pumping once (twice, now,
+   counting the empty pump inside `EnsureInitialized()` and the sixth attempt's throwaway
+   `Window`) drains jobs queued *at that instant*, not the continuation queued *later* when the
+   real I/O actually completes; `ThreadPool.SetMinThreads` was never thread starvation; and the
+   fifth attempt's assembly fixture forced init onto its own thread, so `Dispatcher.UIThread.Invoke`
+   from every other thread blocked on the same unpumped dispatcher — turning an intermittent
+   hang into a deterministic one, which in hindsight was this exact mechanism biting a second,
+   different code path (a *synchronous* `Invoke` rather than an `await`).
+
+   **Fix**, in `HeadlessFixture.EnsureInitialized()` only — no production code touched:
+   `AvaloniaSynchronizationContext.AutoInstall = false;` before `SetupWithoutStarting()`, plus
+   `_ = Dispatcher.UIThread;` immediately after, so dispatcher thread-binding — previously a
+   side effect of `InstallIfNeeded()` — still happens deterministically on the same thread as
+   before, rather than moving to whatever thread references it first. Cannot break a currently
+   passing test: in a loop-less environment the Avalonia sync context can only ever *hang* a
+   continuation, never *deliver* one, so nothing passing today can depend on it.
+
+   **Verification, repro-first:** isolated each of the three exposed classes via
+   `EventScope.App.Tests.exe -class <FullName>` *before* touching the fix —
+   `IngestPipelineStorageTests` and `IngestPipelinePreviewTests` both hung (confirmed by kill
+   after 15s; `IngestPipelineEndToEndTests` passed, consistent with point 6 above). Applied the
+   fix; re-ran the identical isolated commands — both now pass in ~1s. Added
+   `HeadlessFixtureTests.cs`, asserting `SynchronizationContext.Current` is never an
+   `AvaloniaSynchronizationContext` after `EnsureInitialized()`; confirmed it fails against the
+   pre-fix code (stashed the fix, reran, watched it fail with the expected message) and passes
+   with it restored — a real regression guard, not a tautology. Full suite (Release):
+   `EventScope.App.Tests` 94/94 (new regression test included) across 10 consecutive full runs
+   with no hang, plus the two previously-hanging classes independently in a further 10-run loop;
+   `EventScope.Core.Tests` 52/52, `EventScope.Storage.Tests` 54/54,
+   `EventScope.Brokers.Kafka.Tests` 31/31 (Debug — Release hit an unrelated, transient Smart App
+   Control block on that one freshly-rebuilt DLL specifically, confirmed via the
+   `Microsoft-Windows-CodeIntegrity/Operational` log as Event ID 3077/3033, the same signature
+   already tracked elsewhere in this item; Kafka.Tests has no Avalonia dependency at all, so
+   this is unrelated to the fix). The authoritative check is GitHub's `windows-latest` runner —
+   the only environment this bug ever reproduced reliably, and where local Smart App Control is
+   moot — via the `ci` and `release` workflows on the next push.
+
    **A working recipe for driving the real GUI app, established this pass:** Windows UI
    Automation from PowerShell (`Add-Type -AssemblyName UIAutomationClient`) can find
    controls by their accessible `Name` (`AutomationElement.FindFirst` with a
