@@ -256,13 +256,19 @@ security-conscious users something verifiable while the binary is still
 unsigned, and they demonstrate a clean repo-to-binary path during SignPath
 review.
 
-- [ ] Commit the workflow.
-- [ ] Exercise it via its `workflow_dispatch` trigger. Confirm it publishes, attests and
-      uploads a runnable artifact.
-- [ ] **Do not tag `v0.1.0` yet.** `EventScope.App` is still the unmodified Avalonia
+- [x] Commit the workflow.
+- [x] Exercise it. Confirm it publishes, attests and uploads a runnable artifact.
+      Done by the `v0.2.1` tag push rather than by `workflow_dispatch`: the first real
+      exercise of `release.yml` was the `v0.2.0` tag, which reached only the Test step
+      before the Avalonia-headless dispatcher deadlock (Blocked item 2 in
+      `Docs/PROGRESS.md`) hung it into the job timeout - the Publish step never ran. The
+      fix landed one commit after that tag, so `v0.2.1` is the first tag whose code can
+      actually get past Test and into Publish.
+- [x] **Do not tag `v0.1.0` yet.** `EventScope.App` is still the unmodified Avalonia
       template - an empty window. Tagging now would burn the version on an artifact that
       does nothing and produce a release page that misrepresents the project. Tag at the
       end of M1, when the app actually consumes and displays messages.
+      *(Respected: `v0.1.0` was tagged at the end of M1, as this said to.)*
 
 Also add a `build` job to this workflow that runs `dotnet test` on push and pull request.
 `eventscope-implementation-plan.md` section 7 assumes a CI exists ("fail CI on >20%

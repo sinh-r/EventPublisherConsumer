@@ -7,8 +7,9 @@ and **AWS SQS**, without switching between three vendor consoles.
 > **Status: alpha, under active development.** Kafka works end to end — consume, persist,
 > search, and publish back, all through a real UI with no environment variables required.
 > Azure Service Bus and AWS SQS are not implemented yet (both are stubbed projects, tracked
-> as milestone M4). There is no tagged release yet. See
-> [`Docs/PROGRESS.md`](Docs/PROGRESS.md) for the full, honestly-kept status — including what
+> as milestone M4). A prebuilt Windows binary is on the
+> [latest release](../../releases/latest) page, and
+> [`Docs/PROGRESS.md`](Docs/PROGRESS.md) has the full, honestly-kept status — including what
 > currently falls short of its own acceptance criteria.
 >
 > Try it with no setup at all: `dotnet run --project src/EventScope.App`, close the
@@ -73,8 +74,24 @@ and **AWS SQS**, without switching between three vendor consoles.
 
 ## Install
 
-Nothing to install yet — no release has been cut. This section will carry the download and
-a Scoop bucket once the first tagged release ships.
+Download `EventScope.exe` from the [latest release](../../releases/latest). It is a single
+self-contained file — no installer, and no .NET runtime needed on the machine you run it on.
+
+Windows will flag it as an unknown publisher until code signing lands (see below), so unblock
+it once after downloading:
+
+```
+Unblock-File .\EventScope.exe
+```
+
+Every release publishes `EventScope.exe.sha256` next to the binary. To check the download
+before running it:
+
+```
+(Get-FileHash .\EventScope.exe -Algorithm SHA256).Hash -eq (Get-Content .\EventScope.exe.sha256).Trim()
+```
+
+A Scoop bucket is still planned — see [`Docs/DISTRIBUTION_PLAN.md`](Docs/DISTRIBUTION_PLAN.md).
 
 ## Build from source
 

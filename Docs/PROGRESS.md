@@ -1508,6 +1508,70 @@ surface ordinary CI teething issues the way any first run does.
 
 ---
 
+## Release pass — v0.2.1, the first tag that can actually produce a binary (this pass)
+
+You asked why the CI work done so far has never produced a downloadable executable. It is
+three separate things stacked, none of them a bug in the workflows:
+
+1. **`ci.yml` never builds one, by design.** Restore → Build → Test, and nothing else.
+   `dotnet build` does write `EventScope.exe` into the runner's `bin/Release/net10.0/`, but
+   there is no `dotnet publish` and no `upload-artifact`, so the runner is destroyed and the
+   binary with it. It is a correctness gate, not a packager.
+2. **`release.yml` is the workflow that produces the exe, and only tags reach it** —
+   `push: tags: ['v*']` or a manual `workflow_dispatch`. Ordinary pushes to `main` never
+   run it.
+3. **The one `release` run that has ever happened died before Publish.** It ran on the
+   `v0.2.0` tag and hung on its Test step until `timeout-minutes: 20` killed it — Blocked
+   item 2's Avalonia-headless dispatcher deadlock, recorded verbatim in `b02d661`'s own
+   commit message. `Publish` runs after `Test`, so no artifact, hash, attestation or release
+   page was ever created.
+
+The fix (`HeadlessFixture` owning a thread and running `Dispatcher.UIThread.MainLoop` on it)
+landed in `b02d661` — **one commit after `v0.2.0`**, whose remote ref still points at
+`0f82e67`, a pre-fix commit. `main` has the fix; no tag does. Re-running `release` on
+`v0.2.0` would hang again.
+
+**This pass cuts `v0.2.1` so a tag finally exists whose code gets past Test.** Chosen over
+adding a publish + `upload-artifact` step to `ci.yml`: `DISTRIBUTION_PLAN.md`'s rule that
+release artifacts are built by `release.yml` and only there is what makes the SignPath
+provenance story clean, and a second binary-producing path would undercut it.
+
+- **Version bumped 0.2.0 → 0.2.1** in both places the previous bump touched:
+  `Directory.Build.props` (the one place its own comment says to bump per release tag) and
+  `app.manifest`'s `assemblyIdentity version="0.2.1.0"`, which is easy to miss because
+  nothing fails if it drifts. Patch, not minor: everything since `v0.2.0` is
+  test-infrastructure repair with no user-facing change. The tag points at *this* commit, not
+  at `b02d661` — tagging `b02d661` directly would ship a binary stamped `0.2.0` from a release
+  page saying `v0.2.1`.
+- **`v0.2.0` deliberately left where it is.** It is already on the remote and has already been
+  moved once (pushed at `ced0d0d`, now at `0f82e67`); moving a published tag a second time is
+  worse than superseding it.
+- **README Install section written for a release that now exists.** Replaces "Nothing to
+  install yet — no release has been cut" with the download, `Unblock-File`, and a SHA256
+  check against the published `.sha256`. Links are repo-relative (`../../releases/latest`) so
+  they resolve correctly regardless of which owner/name the repo ends up under — see the
+  unresolved `RepositoryUrl` mismatch below.
+- **Pre-flight before tagging:** the dispatcher fix has only ever been verified locally, and
+  this file already records twice that local-clean was misleading for exactly this bug. The
+  `ci` run for `b02d661` on `windows-latest` is the authoritative check, and the tag was not
+  pushed until it was confirmed green — tagging ahead of it risks burning a second version
+  number on a run that hangs the same way. **Confirmed:** that run
+  (2026-09-01T16:23:51Z, `main`) reports `status: completed`, `conclusion: success` —
+  read from the unauthenticated `GET /repos/{owner}/{repo}/actions/runs?head_sha=…` API,
+  which works because the repo is public; only *in-progress job logs* need write access, the
+  403 recorded in item 2 above. So the dispatcher fix holds on the one runner where this bug
+  ever reproduced reliably, not just locally.
+
+**Unresolved, surfaced by this pass:** `origin` is
+`https://github.com/sinh-r/EventPublisherConsumer.git`, but `Directory.Build.props` sets
+`<RepositoryUrl>https://github.com/rsrishabh007/EventScope</RepositoryUrl>` and the README's
+clone command uses that same URL. With `PublishRepositoryUrl=true` the non-matching URL is
+stamped into the shipped binary, and it is metadata the SignPath Foundation review reads.
+Left alone on the assumption that `rsrishabh007/EventScope` is the intended home; if
+`sinh-r/EventPublisherConsumer` is canonical, both need updating.
+
+---
+
 ## Pending — in build-plan order
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
@@ -1842,6 +1906,9 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    against a real broker (not just mocks) before treating it as done, that needs a broker
    endpoint to point at, same as ASB/SQS will need before M4 is "done".
 
-GitHub repository creation and the initial push remain yours. There is still no remote, so
-neither workflow has ever executed - expect the first push to surface ordinary CI teething
-issues (the YAML could not be validated locally; no YAML parser is installed).
+The repository now exists at `origin` and both workflows have executed on GitHub's
+`windows-latest` runner. The first `ci` run (for `ced0d0d`) and the first `release` run (for
+the `v0.2.0` tag) each hung on their Test step and had to be killed by the job timeout - the
+dispatcher deadlock in item 2 above, which is what that item's later attempts fixed. The
+`release` run therefore never reached its Publish step, which is why no binary has ever been
+produced; see the "Release pass - v0.2.1" section for the full account and the fix.
