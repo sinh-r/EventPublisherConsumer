@@ -50,7 +50,7 @@ public sealed class FtsSearchServiceTests : IDisposable
         await WriteMessageAsync(store, "nothing relevant", "c-2", "orders.created", Ct);
         await WaitForIndexAsync(store, 2, Ct);
 
-        var search = new FtsSearchService(store);
+        var search = new FtsSearchService(store.RootDirectory);
         var hits = new List<SearchHit>();
         await foreach (var h in search.SearchBodyAsync("fox", maxResults: 10, Ct))
         {
@@ -78,7 +78,7 @@ public sealed class FtsSearchServiceTests : IDisposable
         await WriteMessageAsync(store, "match on day two", "c-2", "orders.created", Ct);
         await WaitForIndexAsync(store, 1, Ct);
 
-        var search = new FtsSearchService(store);
+        var search = new FtsSearchService(store.RootDirectory);
 
         // Early exit: only 1 result requested, and the newer day (2026-02-02) has a match,
         // so the older day (2026-02-01) must never even be opened.
@@ -100,7 +100,7 @@ public sealed class FtsSearchServiceTests : IDisposable
         await WriteMessageAsync(store, "body", "ab", "orders.created", Ct);
         await WaitForIndexAsync(store, 1, Ct);
 
-        var search = new FtsSearchService(store);
+        var search = new FtsSearchService(store.RootDirectory);
 
         // "ab" is under the trigram tokenizer's 3-character floor (build plan §3.4) - this
         // must still find the row via the LIKE fallback, not silently return nothing.
@@ -121,7 +121,7 @@ public sealed class FtsSearchServiceTests : IDisposable
         await WriteMessageAsync(store, "body", "c-42", "orders.created", Ct);
         await WaitForIndexAsync(store, 1, Ct);
 
-        var search = new FtsSearchService(store);
+        var search = new FtsSearchService(store.RootDirectory);
         var hits = new List<SearchHit>();
         await foreach (var h in search.SearchIdentifiersAsync("c-42", maxResults: 10, Ct))
         {
@@ -139,7 +139,7 @@ public sealed class FtsSearchServiceTests : IDisposable
         await WriteMessageAsync(store, "body", "c-1", "orders.created", Ct);
         await WaitForIndexAsync(store, 1, Ct);
 
-        var search = new FtsSearchService(store);
+        var search = new FtsSearchService(store.RootDirectory);
         var hits = new List<SearchHit>();
         await foreach (var h in search.SearchBodyAsync("nonexistentterm", maxResults: 10, Ct))
         {

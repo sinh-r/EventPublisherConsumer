@@ -27,7 +27,8 @@ public sealed class IngestCoalescer : IDisposable
         ReadOnlyMemory<MessageHeader> headers,
         ReadOnlyMemory<string?> previews,
         ReadOnlyMemory<string> subjects,
-        ReadOnlyMemory<string> correlationIds);
+        ReadOnlyMemory<string> correlationIds,
+        ReadOnlyMemory<string> days);
 
     private readonly IUiTicker _ticker;
     private readonly int _stagingCapacity;
@@ -53,7 +54,14 @@ public sealed class IngestCoalescer : IDisposable
         _ticker.Start();
     }
 
-    public void Enqueue(in MessageHeader header, string? preview, string subject, string correlationId)
+    /// <param name="day">The storage day the message was actually written under — carried per
+    /// message, not per batch. A batch that spans a day rollover holds messages filed under two
+    /// different directories, and because segment ids restart at 0 each day, stamping the whole
+    /// batch with either day would point some of its rows at a different message's bytes. Opaque
+    /// here (this class never interprets it) and defaulted, so callers with no storage behind
+    /// them are unaffected.</param>
+    public void Enqueue(
+        in MessageHeader header, string? preview, string subject, string correlationId, string day = "")
     {
         lock (_gate)
         {
@@ -69,6 +77,7 @@ public sealed class IngestCoalescer : IDisposable
             buffer.Previews[i] = preview;
             buffer.Subjects[i] = subject;
             buffer.CorrelationIds[i] = correlationId;
+            buffer.Days[i] = day;
             buffer.Count = i + 1;
         }
     }
@@ -90,7 +99,8 @@ public sealed class IngestCoalescer : IDisposable
             ready.Headers.AsMemory(0, ready.Count),
             ready.Previews.AsMemory(0, ready.Count),
             ready.Subjects.AsMemory(0, ready.Count),
-            ready.CorrelationIds.AsMemory(0, ready.Count));
+            ready.CorrelationIds.AsMemory(0, ready.Count),
+            ready.Days.AsMemory(0, ready.Count));
     }
 
     public void Dispose()
@@ -105,6 +115,7 @@ public sealed class IngestCoalescer : IDisposable
         public readonly string?[] Previews;
         public readonly string[] Subjects;
         public readonly string[] CorrelationIds;
+        public readonly string[] Days;
         public int Count;
 
         public Buffer(int capacity)
@@ -113,6 +124,7 @@ public sealed class IngestCoalescer : IDisposable
             Previews = new string?[capacity];
             Subjects = new string[capacity];
             CorrelationIds = new string[capacity];
+            Days = new string[capacity];
         }
     }
 }

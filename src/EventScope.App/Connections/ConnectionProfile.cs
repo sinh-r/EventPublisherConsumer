@@ -58,6 +58,20 @@ public sealed class ConnectionProfile
     /// the whole topic. <see langword="null"/> means all partitions.</summary>
     public int? Partition { get; set; }
 
+    /// <summary>An <c>EventScope.Brokers.Kafka.KafkaStartFrom</c> member name — where a run starts.
+    /// <see langword="null"/> or an unrecognised value means <c>Latest</c> (tail from now), which
+    /// is both the default and what every connection saved before this existed will deserialize
+    /// to.</summary>
+    public string? StartFrom { get; set; }
+
+    /// <summary>The moment to start from when <see cref="StartFrom"/> is <c>Timestamp</c>.</summary>
+    public DateTime? StartTimestampUtc { get; set; }
+
+    /// <summary>The offset to start from when <see cref="StartFrom"/> is <c>Offset</c>. Requires
+    /// <see cref="Partition"/>: offsets are per-partition, so one number across a whole topic
+    /// means a different message in each.</summary>
+    public long? StartOffset { get; set; }
+
     /// <summary>A <c>Confluent.Kafka.SecurityProtocol</c> member name, or <see langword="null"/>
     /// for the client default.</summary>
     public string? SecurityProtocol { get; set; }

@@ -320,6 +320,7 @@ Make these reachable, ideally via a small hidden dev-toggle panel:
 | Deep search running | Overlay with progress. |
 | Near cap | Status bar meter amber at 96%. |
 | Mixed grid | Rows including large, evicted, and dead-lettered variants. |
+| Browsing history | Amber banner naming the capture and day, with "Back to live". The grid shows rows read off disk; live capture continues, pinned, behind it. |
 
 ---
 
@@ -328,3 +329,11 @@ Make these reachable, ideally via a small hidden dev-toggle panel:
 Do not design or build: charts, dashboards, analytics, message replay
 timelines, topic browsers, schema registry UI, user accounts, onboarding tours,
 or any animation beyond simple state transitions under 150ms.
+
+**Amended (Stage 5b).** A replay *timeline* — a scrubber widget over a topic — remains out of
+scope, as does a topic browser. Two things that read as neighbours of those are now explicitly
+**in** scope, because without them the tool could only ever answer "what is happening?" and never
+"what did I miss?", which is the first question a debugging tool gets asked:
+
+- **A start position on a connection** (§6) — a plain combo choosing where a consume run begins.
+- **Browsing captured sessions** (§10) — a picker over what is already on disk.

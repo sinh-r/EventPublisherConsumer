@@ -23,8 +23,11 @@ public partial class MainWindow : Window
         _rowStateClassSync.OnLoadingRow(e.Row, e.Row.DataContext as MessageRowViewModel);
     }
 
+    // Routed through ActiveRows, not Rows: in history mode the recycled row belongs to the
+    // history view, and returning it to the live ring's pool would hand a stale instance to a
+    // different logical row.
     private void OnUnloadingRow(object? sender, DataGridRowEventArgs e) =>
-        ViewModel.Rows.NotifyRowUnloaded(e.Row.Index);
+        ViewModel.ActiveRows.NotifyRowUnloaded(e.Row.Index);
 
     private async void OnGridSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {

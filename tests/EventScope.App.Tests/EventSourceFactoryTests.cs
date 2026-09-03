@@ -1,6 +1,7 @@
 using EventScope.App.Connections;
 using EventScope.App.Ingest;
 using EventScope.App.Publisher;
+using EventScope.Brokers.Kafka;
 using EventScope.Core.Ingest;
 using Xunit;
 
@@ -147,5 +148,97 @@ public sealed class EventSinkFactoryTests
         var sink = EventSinkFactory.Create(profile);
 
         Assert.NotNull(sink);
+    }
+
+    // --- Start position ---
+
+    [Fact]
+    public void A_profile_saved_before_start_positions_existed_still_tails_from_now()
+    {
+        // StartFrom is null on every connections.json written before this feature. Latest is the
+        // only safe reading of that.
+        var options = EventSourceFactory.BuildKafkaSourceOptions(new ConnectionProfile
+        {
+            Kind = ConnectionKind.Kafka,
+            BootstrapServers = "broker:9092",
+            Topics = "orders",
+        });
+
+        Assert.Equal(KafkaStartFrom.Latest, options.StartFrom);
+    }
+
+    [Fact]
+    public void An_unrecognised_start_position_falls_back_to_latest()
+    {
+        var options = EventSourceFactory.BuildKafkaSourceOptions(new ConnectionProfile
+        {
+            Kind = ConnectionKind.Kafka,
+            BootstrapServers = "broker:9092",
+            Topics = "orders",
+            StartFrom = "SomethingElse",
+        });
+
+        Assert.Equal(KafkaStartFrom.Latest, options.StartFrom);
+    }
+
+    [Fact]
+    public void Earliest_and_a_timestamp_map_onto_the_source_options()
+    {
+        var at = new DateTime(2026, 8, 29, 10, 0, 0, DateTimeKind.Utc);
+
+        var earliest = EventSourceFactory.BuildKafkaSourceOptions(new ConnectionProfile
+        {
+            Kind = ConnectionKind.Kafka,
+            BootstrapServers = "broker:9092",
+            Topics = "orders",
+            StartFrom = "Earliest",
+        });
+        Assert.Equal(KafkaStartFrom.Earliest, earliest.StartFrom);
+
+        var timestamp = EventSourceFactory.BuildKafkaSourceOptions(new ConnectionProfile
+        {
+            Kind = ConnectionKind.Kafka,
+            BootstrapServers = "broker:9092",
+            Topics = "orders",
+            StartFrom = "Timestamp",
+            StartTimestampUtc = at,
+        });
+        Assert.Equal(KafkaStartFrom.Timestamp, timestamp.StartFrom);
+        Assert.Equal(at, timestamp.StartTimestampUtc!.Value.UtcDateTime);
+    }
+
+    [Fact]
+    public void Starting_at_an_offset_without_a_partition_is_refused()
+    {
+        // Offsets are per-partition: applied across a subscribed topic, one number means a
+        // different message in each. The editor blocks this too; this is the defence against a
+        // hand-edited connections.json.
+        var profile = new ConnectionProfile
+        {
+            Kind = ConnectionKind.Kafka,
+            BootstrapServers = "broker:9092",
+            Topics = "orders",
+            StartFrom = "Offset",
+            StartOffset = 12_345,
+        };
+
+        Assert.Throws<NotSupportedException>(() => EventSourceFactory.BuildKafkaSourceOptions(profile));
+    }
+
+    [Fact]
+    public void Starting_at_an_offset_with_a_partition_maps_through()
+    {
+        var options = EventSourceFactory.BuildKafkaSourceOptions(new ConnectionProfile
+        {
+            Kind = ConnectionKind.Kafka,
+            BootstrapServers = "broker:9092",
+            Topics = "orders",
+            Partition = 3,
+            StartFrom = "Offset",
+            StartOffset = 12_345,
+        });
+
+        Assert.Equal(KafkaStartFrom.Offset, options.StartFrom);
+        Assert.Equal(12_345, options.StartOffset);
     }
 }

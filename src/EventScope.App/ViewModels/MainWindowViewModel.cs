@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Collections;
 using EventScope.App.Connections;
+using EventScope.App.History;
 using EventScope.App.Ingest;
 using EventScope.App.Publisher;
 using EventScope.App.Settings;
@@ -69,6 +70,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public ConnectionManagerViewModel ConnectionManager { get; }
 
+    /// <summary>Browsing already-captured sessions. Independent of the ingest pipeline — history
+    /// must be readable with no connection started.</summary>
+    public HistoryViewModel History { get; }
+
     /// <summary>Tab strip entries (UI spec §4.1) — one per connection the user has opened
     /// this session, not one per saved connection.</summary>
     public ObservableCollection<ConnectionTabViewModel> Tabs { get; } = [];
@@ -91,6 +96,31 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     public partial bool IsPublisherOpen { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsHistoryOpen { get; set; }
+
+    /// <summary>Which source the message grid is showing. Live ingest keeps running in history
+    /// mode — the live ring is pinned rather than stopped, so its "N new messages" counter tells
+    /// you what arrived while you were reading, and nothing is lost by looking away.</summary>
+    [ObservableProperty]
+    public partial GridMode Mode { get; set; }
+
+    /// <summary>What the grid binds to. Both implementations virtualize; see
+    /// <see cref="IGridRowsView"/> for why that is load-bearing rather than incidental.</summary>
+    public IGridRowsView ActiveRows => Mode == GridMode.Live ? Rows : History.Rows;
+
+    public bool IsHistoryMode => Mode == GridMode.History;
+
+    partial void OnModeChanged(GridMode value)
+    {
+        if (value == GridMode.History) Rows.Pin();
+        else Rows.Unpin();
+
+        OnPropertyChanged(nameof(ActiveRows));
+        OnPropertyChanged(nameof(IsHistoryMode));
+        RefreshStats();
+    }
+
     /// <summary>UI spec §10's Error state: "Red tab dot, banner with broker error text, retry
     /// button." Recomputed from <see cref="SelectedTab"/>'s own status, including live updates
     /// while that tab stays selected — see <see cref="OnSelectedTabChanged"/>.</summary>
@@ -106,6 +136,26 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void ToggleConnectionManager() => IsConnectionManagerOpen = !IsConnectionManagerOpen;
+
+    /// <summary>Opens the history drawer, rescanning what is on disk. Deliberately does not switch
+    /// the grid on its own — picking a day is what does that.</summary>
+    [RelayCommand]
+    private void ToggleHistory()
+    {
+        IsHistoryOpen = !IsHistoryOpen;
+        if (IsHistoryOpen) History.RefreshSessions();
+    }
+
+    /// <summary>Returns the grid to the live stream. The browse is closed rather than merely
+    /// hidden, so its day-file handles are released — retention cannot delete a day directory on
+    /// Windows while one is still open.</summary>
+    [RelayCommand]
+    private void BackToLive()
+    {
+        History.Close();
+        Mode = GridMode.Live;
+        IsHistoryOpen = false;
+    }
 
     /// <summary>"Use as publish template" (build plan §5 M3 step 10): schema-infers a
     /// generator per leaf from the currently selected message's body and opens the publisher
@@ -132,11 +182,25 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public MainWindowViewModel()
     {
-        Search = new SearchViewModel(Rows, () => _sessionStore is null ? null : new FtsSearchService(_sessionStore));
+        // Keyed off the selected tab rather than the live session store: FTS reads day files
+        // straight off disk, so search now works on a connection that has never been started
+        // this run - which is the whole point of being able to look at past captures.
+        Search = new SearchViewModel(
+            Rows,
+            () => SelectedTab is { } tab ? new FtsSearchService(SessionRootDirectory(tab.Profile.Id)) : null);
         Settings = new SettingsViewModel(_settings, () => _sessionStore, () => _retentionService);
         Publisher = new PublisherViewModel(sinkProvider: () => _sink ??= EventSinkFactory.Create(SelectedTab?.Profile));
 
         ConnectionManager = new ConnectionManagerViewModel(ConnectionStore.Load(), profiles => ConnectionStore.Save(profiles));
+
+        // Constructed after ConnectionManager so the saved-connection names it resolves capture
+        // directories with are actually available to it.
+        History = new HistoryViewModel(() => ConnectionManager.SavedConnections.ToList());
+        History.BrowseOpened += () => Mode = GridMode.History;
+
+        // FTS already searches every day file on disk; this is what finally lets those matches be
+        // opened rather than only counted.
+        Search.ResultsRequested += (hits, root, label) => History.ShowResults(hits, root, label);
         ConnectionManager.ConnectRequested += profile =>
         {
             OpenOrSelectTab(profile);
@@ -392,17 +456,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// built-in Fake source both keep the exact original unnamespaced path — the layout every
     /// session before this pass was already written under — so nothing on disk is orphaned by
     /// this change.</summary>
-    private static string SessionRootDirectory(Guid? profileId)
-    {
-        var baseDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "EventScope",
-            "sessions");
-
-        return profileId is null || profileId == ConnectionProfile.FakeSourceId
-            ? baseDirectory
-            : Path.Combine(baseDirectory, profileId.Value.ToString("N"));
-    }
+    private static string SessionRootDirectory(Guid? profileId) => SessionCatalog.RootFor(profileId);
 
     private async Task StopAsync()
     {
@@ -428,15 +482,42 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async Task OnSelectedRowChangedAsync(MessageRowViewModel? vm)
     {
-        Rows.SetSelected(vm);
-        if (vm is not null)
+        ActiveRows.SetSelected(vm);
+
+        // Pinning is a live-ring concept: it freezes a window that would otherwise scroll out from
+        // under the selection. History does not move, so there is nothing to freeze.
+        if (vm is not null && Mode == GridMode.Live)
         {
             Rows.Pin();
         }
 
-        await Detail.LoadAsync(vm, _pipeline, _sessionStore).ConfigureAwait(true);
+        // Both modes resolve a payload against the day the row names rather than one inferred from
+        // its timestamp - see HistoryPayloadReaders' remarks on why the day has to travel with the
+        // row. A browsed row reads through its own day's segments, since the pipeline may not even
+        // be running; a live row still reads hot-ring-first, with only the cold fallback pinned to
+        // the day the writer filed it under. That is what makes a replayed Kafka backlog - old
+        // messages written under today - readable in the live grid.
+        var (reader, pinnedFields) = Mode == GridMode.History
+            ? (History.ReaderFor(vm), History.PinnedFieldsFor(ConfiguredPinnedFields()))
+            : (_pipeline?.ReaderFor(vm?.Day), CurrentPinnedFieldSource());
+
+        await Detail.LoadAsync(vm, reader, pinnedFields).ConfigureAwait(true);
         RefreshStats();
     }
+
+    /// <summary>The pinned fields configured in settings, in the storage layer's shape. The same
+    /// projection <see cref="Start"/> hands to a new <see cref="SessionStore"/>.</summary>
+    private IReadOnlyList<PinnedField> ConfiguredPinnedFields() =>
+        [.. _settings.PinnedFields.Select(f => new PinnedField(f.Name, f.JsonPath))];
+
+    /// <summary>The live session's pinned-field lookup source, or <see langword="null"/>
+    /// before a connection has been started. A <see cref="PinnedFieldSource"/> rather than the
+    /// <see cref="SessionStore"/> itself so the detail pane never depends on the writer-owning
+    /// type — history mode has no store to hand it.</summary>
+    private PinnedFieldSource? CurrentPinnedFieldSource() =>
+        _sessionStore is null
+            ? null
+            : new PinnedFieldSource(_sessionStore.RootDirectory, _sessionStore.PinnedFields);
 
     private void RefreshStats()
     {
@@ -456,7 +537,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         StatusBar.Update(
             totalAppended: Rows.TotalAppended,
             uiDropped: _pipeline?.UiDropped ?? StatusBar.UiDropped,
-            visibleRowCount: Rows.Count,
+            // What the grid is actually showing - in history mode that is the browse, not the ring.
+            visibleRowCount: ActiveRows.Count,
             byteBudgetUsed: _pipeline?.ByteBudgetUsed ?? 0,
             byteBudgetLimit: _pipeline?.ByteBudgetLimit ?? 0,
             isPinned: Rows.IsPinned,

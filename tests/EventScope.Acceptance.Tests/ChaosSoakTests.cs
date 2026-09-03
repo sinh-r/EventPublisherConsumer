@@ -64,7 +64,7 @@ public sealed class ChaosSoakTests
             var pipeline = new IngestPipeline(countingSource, rows, ticker, sessionStore);
             pipeline.Start();
 
-            var search = new FtsSearchService(sessionStore);
+            var search = new FtsSearchService(sessionStore.RootDirectory);
             var sqliteBusyMessages = new List<string>();
             var rolledOver = false;
             var elapsed = System.Diagnostics.Stopwatch.StartNew();

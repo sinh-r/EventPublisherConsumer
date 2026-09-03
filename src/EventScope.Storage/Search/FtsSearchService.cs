@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using EventScope.Core.Models;
 using Microsoft.Data.Sqlite;
 using EventScope.Storage.Sqlite;
 
@@ -6,9 +7,17 @@ namespace EventScope.Storage.Search;
 
 public enum SearchScope { Body, Identifiers }
 
-/// <summary>One matched row, stamped with the index high-water mark of the day file it came
-/// from — the build plan's own requirement: "every FTS result set is stamped with its
-/// IndexHwm so the UI can state whether results are current."</summary>
+/// <summary>
+/// One message read back off disk — the shared projection for every cold read of the
+/// <c>messages</c> table, whether it arrived by full-text search
+/// (<see cref="FtsSearchService"/>) or by plain history paging
+/// (<see cref="HistoryQueryService"/>). <see cref="Day"/> is the directory the row was actually
+/// read from, which is the only trustworthy way to locate its payload again.
+///
+/// <para><see cref="IndexHwm"/> is meaningful only for search results — the build plan requires
+/// that "every FTS result set is stamped with its IndexHwm so the UI can state whether results
+/// are current". A non-search read reports <see cref="IndexHwmNotApplicable"/>.</para>
+/// </summary>
 public sealed record SearchHit(
     string Day,
     long MessageRowId,
@@ -20,7 +29,15 @@ public sealed record SearchHit(
     string? CorrelationId,
     string Subject,
     string? Preview,
-    long IndexHwm);
+    short Partition,
+    MessageFlags Flags,
+    long IndexHwm)
+{
+    /// <summary>Reported as <see cref="IndexHwm"/> by a read that never consulted the FTS index
+    /// at all — plain history paging (<see cref="HistoryQueryService"/>). Distinct from a real
+    /// hwm of 0, which means the index exists but has nothing in it yet.</summary>
+    public const long IndexHwmNotApplicable = -1;
+}
 
 /// <summary>
 /// Tiered full-text search against <see cref="SessionStore"/>'s day files — the FTS tier of
@@ -45,8 +62,12 @@ public sealed record SearchHit(
 /// <c>query.Length &lt; 3</c> themselves before calling.
 /// </para>
 /// </summary>
-public sealed class FtsSearchService(SessionStore sessionStore)
+public sealed class FtsSearchService(string rootDirectory)
 {
+    /// <summary>The session root these queries run against — callers that act on a hit (reading its
+    /// payload back) need the same root the hit came from.</summary>
+    public string RootDirectory => rootDirectory;
+
     private const int TrigramMinimumLength = 3;
 
     public IAsyncEnumerable<SearchHit> SearchBodyAsync(string query, int maxResults, CancellationToken cancellationToken) =>
@@ -65,15 +86,15 @@ public sealed class FtsSearchService(SessionStore sessionStore)
 
         // Newest day first - early exit means never opening an older day file once enough
         // results have already been found in more recent ones.
-        var days = sessionStore.ListDayDirectories();
+        var days = SessionLayout.ListDayDirectories(rootDirectory);
         for (var i = days.Count - 1; i >= 0 && remaining > 0; i--)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var day = days[i];
-            var dbPath = Path.Combine(sessionStore.RootDirectory, day, $"{day}.db");
+            var dbPath = SessionLayout.DayDatabasePath(rootDirectory, day);
             if (!File.Exists(dbPath)) continue;
 
-            await using var connection = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly;Pooling=False");
+            await using var connection = new SqliteConnection(SessionLayout.ReadOnlyConnectionString(dbPath));
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             long hwm;
@@ -94,18 +115,7 @@ public sealed class FtsSearchService(SessionStore sessionStore)
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield return new SearchHit(
-                    Day: day,
-                    MessageRowId: reader.GetInt64(0),
-                    EnqueuedTicks: reader.GetInt64(1),
-                    SegmentId: reader.GetInt32(2),
-                    Offset: reader.GetInt32(3),
-                    Length: reader.GetInt32(4),
-                    MessageId: reader.IsDBNull(5) ? null : reader.GetString(5),
-                    CorrelationId: reader.IsDBNull(6) ? null : reader.GetString(6),
-                    Subject: reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                    Preview: reader.IsDBNull(8) ? null : reader.GetString(8),
-                    IndexHwm: hwm);
+                yield return MessageRowQuery.ReadHit(reader, day, hwm);
 
                 remaining--;
                 if (remaining <= 0) yield break;
@@ -118,33 +128,33 @@ public sealed class FtsSearchService(SessionStore sessionStore)
     /// phrase or the parser misreads it as an exclusion.</summary>
     private static string QuoteAsPhrase(string query) => $"\"{query.Replace("\"", "\"\"")}\"";
 
+    /// <summary>All three variants project the same columns in the same order
+    /// (<see cref="MessageRowQuery.Columns"/>) so <see cref="MessageRowQuery.ReadHit"/> can read
+    /// any of them. They differ only in what they join and match against.</summary>
     private static string BuildQuery(SearchScope scope, bool useLikeFallback) => scope switch
     {
-        SearchScope.Body => """
-            SELECT m.id, m.enqueued_ticks, m.segment_id, m.offset, m.length,
-                   m.message_id, m.correlation_id, COALESCE(s.name, ''), m.preview
+        SearchScope.Body => $"""
+            SELECT {MessageRowQuery.Columns}
             FROM body_fts f
             JOIN messages m ON m.id = f.rowid
-            LEFT JOIN subjects s ON s.id = m.subject_id
+            {MessageRowQuery.SubjectJoin}
             WHERE f.body_fts MATCH $query
             ORDER BY m.id DESC
             LIMIT $limit
             """,
-        SearchScope.Identifiers when useLikeFallback => """
-            SELECT m.id, m.enqueued_ticks, m.segment_id, m.offset, m.length,
-                   m.message_id, m.correlation_id, COALESCE(s.name, ''), m.preview
+        SearchScope.Identifiers when useLikeFallback => $"""
+            SELECT {MessageRowQuery.Columns}
             FROM messages m
-            LEFT JOIN subjects s ON s.id = m.subject_id
+            {MessageRowQuery.SubjectJoin}
             WHERE m.correlation_id LIKE $query OR m.message_id LIKE $query
             ORDER BY m.id DESC
             LIMIT $limit
             """,
-        SearchScope.Identifiers => """
-            SELECT m.id, m.enqueued_ticks, m.segment_id, m.offset, m.length,
-                   m.message_id, m.correlation_id, COALESCE(s.name, ''), m.preview
+        SearchScope.Identifiers => $"""
+            SELECT {MessageRowQuery.Columns}
             FROM ident_fts f
             JOIN messages m ON m.id = f.rowid
-            LEFT JOIN subjects s ON s.id = m.subject_id
+            {MessageRowQuery.SubjectJoin}
             WHERE f.ident_fts MATCH $query
             ORDER BY m.id DESC
             LIMIT $limit

@@ -29,8 +29,8 @@ public class IngestPipelineEndToEndTests
         using var coalescer = new IngestCoalescer(ticker);
         var rows = new MessageRowsView(capacity: 1024);
 
-        coalescer.BatchReady += (headers, previews, subjects, correlationIds) =>
-            rows.AppendBatch(headers.Span, previews.Span, subjects.Span, correlationIds.Span);
+        coalescer.BatchReady += (headers, previews, subjects, correlationIds, days) =>
+            rows.AppendBatch(headers.Span, previews.Span, subjects.Span, correlationIds.Span, days.Span);
 
         for (var i = 0; i < 50; i++)
         {
@@ -51,8 +51,8 @@ public class IngestPipelineEndToEndTests
         var ticker = new ManualTicker();
         using var coalescer = new IngestCoalescer(ticker);
         var rows = new MessageRowsView(capacity: 1024);
-        coalescer.BatchReady += (headers, previews, subjects, correlationIds) =>
-            rows.AppendBatch(headers.Span, previews.Span, subjects.Span, correlationIds.Span);
+        coalescer.BatchReady += (headers, previews, subjects, correlationIds, days) =>
+            rows.AppendBatch(headers.Span, previews.Span, subjects.Span, correlationIds.Span, days.Span);
 
         coalescer.Enqueue(Header(0, MessageFlags.IsLarge), null, "s", "c");
         coalescer.Enqueue(Header(1, MessageFlags.IsDeadLettered), null, "s", "c");

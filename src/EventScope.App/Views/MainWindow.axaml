@@ -128,7 +128,7 @@
         <!-- Connection toolbar. -->
         <Border Grid.Row="1" Background="{DynamicResource Surf}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
                 <Panel Grid.Column="0" Width="8" Height="8" Margin="0,0,8,0">
                     <Ellipse Fill="{DynamicResource Green}" IsVisible="{Binding Toolbar.IsRunning}" />
                     <Ellipse Fill="{DynamicResource Dim}" IsVisible="{Binding !Toolbar.IsRunning}" />
@@ -204,7 +204,15 @@
                         Foreground="{DynamicResource Text}" Padding="10,4"
                         FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
 
-                <Button Grid.Column="7" Content="Settings" Command="{Binding ToggleSettingsCommand}"
+                <!-- Browsing what was already captured. Deliberately next to Publish/Settings
+                     rather than in the tab strip: it is a way of looking at the current
+                     connection, not a different connection. -->
+                <Button Grid.Column="7" Content="History" Command="{Binding ToggleHistoryCommand}"
+                        Margin="8,0,0,0" Background="Transparent" BorderBrush="{DynamicResource Line}"
+                        Foreground="{DynamicResource Text}" Padding="10,4"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+
+                <Button Grid.Column="8" Content="Settings" Command="{Binding ToggleSettingsCommand}"
                         Margin="8,0,0,0" Background="Transparent" BorderBrush="{DynamicResource Line}"
                         Foreground="{DynamicResource Text}" Padding="10,4"
                         FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
@@ -241,6 +249,23 @@
             </Grid>
         </Border>
 
+        <!-- History mode. Says plainly that the grid is no longer showing live traffic, and that
+             capture is still running underneath - the live ring is pinned, not stopped. -->
+        <Border Grid.Row="2" Height="36" Background="{DynamicResource AmberTint}"
+                BorderBrush="{DynamicResource Amber}" BorderThickness="0,0,0,1" Padding="14,0"
+                IsVisible="{Binding IsHistoryMode}">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource Amber}"
+                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                           Text="{Binding History.OpenDescription, StringFormat='Browsing {0} — live capture continues in the background.'}" />
+                <Button Grid.Column="1" Content="Back to live" Command="{Binding BackToLiveCommand}"
+                        Background="Transparent" BorderBrush="{DynamicResource Amber}"
+                        Foreground="{DynamicResource Amber}" Padding="10,3"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+            </Grid>
+        </Border>
+
         <!-- Search bar. Two tiers wired here (build plan §5 M2): the instant ring filter
              (every keystroke, no delay - highlights matching rows already on screen) and
              body FTS (debounced, reports a match count and whether the index is current).
@@ -260,6 +285,13 @@
                     <TextBlock FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
                                Foreground="{DynamicResource Muted}"
                                Text="{Binding Search.StatusText}" />
+                    <!-- FTS searches every day file on disk, so matches routinely come from past
+                         sessions. Opening them is an explicit gesture rather than something the
+                         debounced search does per keystroke - see SearchViewModel.ResultsRequested. -->
+                    <Button Content="Show matches" Command="{Binding Search.ShowResultsCommand}"
+                            Background="Transparent" BorderBrush="{DynamicResource Line}"
+                            Foreground="{DynamicResource Text}" Padding="10,3"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
                     <TextBlock IsVisible="{Binding !Search.IndexIsCurrent}"
                                FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
                                Foreground="{DynamicResource Amber}"
@@ -269,12 +301,14 @@
             </Grid>
         </Border>
 
-        <!-- Message grid. MessageRowsView (Rows) implements IDataGridCollectionView + IList
-             directly so DataGrid never wraps it in its own eagerly-enumerating
-             DataGridCollectionView — see MessageRowsView's class remarks. -->
+        <!-- Message grid. Both sources behind ActiveRows (the live ring and the history view)
+             implement IDataGridCollectionView + IList directly, so DataGrid never wraps either in
+             its own eagerly-enumerating DataGridCollectionView - see IGridRowsView's remarks, and
+             HistoryGridVirtualizationTests, which measures that the mode switch keeps that
+             property. -->
         <DataGrid Grid.Row="4" x:Name="MessageGrid"
                   x:CompileBindings="False"
-                  ItemsSource="{Binding Rows}"
+                  ItemsSource="{Binding ActiveRows}"
                   AutoGenerateColumns="False"
                   IsReadOnly="True"
                   CanUserSortColumns="False"
@@ -841,6 +875,45 @@
                                     </StackPanel>
                                 </Grid>
 
+
+                                <!-- Start position. The only control here that decides whether the
+                                     tool reads what is already on the topic; everything else is
+                                     about how to connect. -->
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="START FROM" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <ComboBox ItemsSource="{x:Static vm:ConnectionManagerViewModel.StartFromOptions}"
+                                                  SelectedItem="{Binding ConnectionManager.EditStartFrom, Mode=TwoWay}"
+                                                  HorizontalAlignment="Stretch"
+                                                  Background="{DynamicResource Surf2}" Foreground="{DynamicResource Text}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4"
+                                                IsVisible="{Binding ConnectionManager.IsStartFromTimestamp}">
+                                        <TextBlock Text="FROM (UTC)" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditStartTimestampText, Mode=TwoWay}"
+                                                 Watermark="yyyy-MM-dd HH:mm:ss"
+                                                 Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                                                 Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4"
+                                                IsVisible="{Binding ConnectionManager.IsStartFromOffset}">
+                                        <TextBlock Text="FROM OFFSET" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
+                                        <TextBox Text="{Binding ConnectionManager.EditStartOffsetText, Mode=TwoWay}"
+                                                 Watermark="requires a partition"
+                                                 Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                                                 Foreground="{DynamicResource Text}"
+                                                 FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Earliest is safe for the broker and costly locally, which is the
+                                     opposite of what the word suggests. Say both. -->
+                                <TextBlock IsVisible="{Binding ConnectionManager.IsStartFromEarliest}"
+                                           TextWrapping="Wrap"
+                                           FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                                           Foreground="{DynamicResource Amber}"
+                                           Text="Reads everything the topic still retains. Safe for the broker — this tool never commits offsets — but a large topic will fill the local capture, evict the oldest of it, and leave search indexing behind while it catches up." />
                                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                                     <StackPanel Grid.Column="0" Spacing="4">
                                         <TextBlock Text="SECURITY PROTOCOL" FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5" Foreground="{DynamicResource Dim}" />
@@ -1037,6 +1110,102 @@
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
+        </Border>
+
+        <!-- History browser. Same overlay shape as the settings and connection-manager surfaces
+             (a Panel scrim plus a Border, not a Window) per the mockup-to-Avalonia mapping rule.
+             Picking a day is what switches the grid; opening this drawer on its own does not. -->
+        <Panel Grid.Row="0" Grid.RowSpan="9" IsVisible="{Binding IsHistoryOpen}"
+               Background="#0A0B12" Opacity="0.58" />
+        <!-- x:CompileBindings="False" for the same reason the connection manager sets it: the
+             ListBox item templates below bind against SessionEntry/DayEntry rather than the
+             window's own data type. -->
+        <Border Grid.Row="0" Grid.RowSpan="9" IsVisible="{Binding IsHistoryOpen}"
+                x:CompileBindings="False"
+                Width="560" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="{DynamicResource Raise}" CornerRadius="8" Padding="20"
+                BoxShadow="0 24 60 0 #80000000">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,14">
+                    <TextBlock Text="History" FontFamily="{DynamicResource SansFontFamily}"
+                               FontSize="14" FontWeight="Medium" Foreground="{DynamicResource Text}" />
+                    <TextBlock Text="Everything already captured on this machine. Reading it does not touch the broker."
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="11.5"
+                               TextWrapping="Wrap" Foreground="{DynamicResource Muted}" />
+                </StackPanel>
+
+                <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,14,0,0">
+                    <TextBlock Grid.Column="0" Text="{Binding History.StatusText}"
+                               VerticalAlignment="Center" TextWrapping="Wrap"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="11.5"
+                               Foreground="{DynamicResource Muted}" />
+                    <Button Grid.Column="1" Content="Close" Command="{Binding ToggleHistoryCommand}"
+                            Background="Transparent" BorderBrush="{DynamicResource Line}"
+                            Foreground="{DynamicResource Text}" Padding="10,4" Margin="8,0,0,0"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                    <Button Grid.Column="2" Content="Open all days" Command="{Binding History.OpenSessionCommand}"
+                            Background="Transparent" BorderBrush="{DynamicResource Line}"
+                            Foreground="{DynamicResource Text}" Padding="10,4" Margin="8,0,0,0"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                    <Button Grid.Column="3" Content="Open day" Command="{Binding History.OpenDayCommand}"
+                            Background="{DynamicResource Accent}" BorderThickness="0"
+                            Foreground="#0A0B12" Padding="12,4" Margin="8,0,0,0"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" FontWeight="Medium" />
+                </Grid>
+
+                <Grid ColumnDefinitions="*,12,*">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="CAPTURE" FontFamily="{DynamicResource SansFontFamily}"
+                                   FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+                        <ListBox ItemsSource="{Binding History.Sessions}"
+                                 SelectedItem="{Binding History.SelectedSession}"
+                                 MaxHeight="320" Background="{DynamicResource Surf2}"
+                                 BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Spacing="2" Margin="0,2">
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                                                   Foreground="{DynamicResource Text}" />
+                                        <TextBlock FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                                                   Foreground="{DynamicResource Muted}"
+                                                   Text="{Binding DayCount, StringFormat='{}{0} day(s)'}" />
+                                        <!-- The shared-root and deleted-connection cases both surface
+                                             here rather than being papered over. -->
+                                        <TextBlock Text="{Binding Note}"
+                                                   IsVisible="{Binding Note, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                                                   TextWrapping="Wrap"
+                                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="10.5"
+                                                   Foreground="{DynamicResource Amber}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Spacing="6">
+                        <TextBlock Text="DAY" FontFamily="{DynamicResource SansFontFamily}"
+                                   FontSize="11" LetterSpacing="1" Foreground="{DynamicResource Dim}" />
+                        <ListBox ItemsSource="{Binding History.Days}"
+                                 SelectedItem="{Binding History.SelectedDay}"
+                                 MaxHeight="320" Background="{DynamicResource Surf2}"
+                                 BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Spacing="2" Margin="0,2">
+                                        <TextBlock Text="{Binding Day}"
+                                                   FontFamily="{DynamicResource MonoFontFamily}" FontSize="12.5"
+                                                   Foreground="{DynamicResource Text}" />
+                                        <TextBlock Text="{Binding CountLabel}"
+                                                   FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
+                                                   Foreground="{DynamicResource Muted}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                </Grid>
+            </DockPanel>
         </Border>
     </Grid>
 </Window>

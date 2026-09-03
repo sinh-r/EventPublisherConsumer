@@ -15,7 +15,7 @@ public class IngestCoalescerTests
         var ticker = new ManualTicker();
         using var coalescer = new IngestCoalescer(ticker);
         var raised = false;
-        coalescer.BatchReady += (_, _, _, _) => raised = true;
+        coalescer.BatchReady += (_, _, _, _, _) => raised = true;
 
         coalescer.Enqueue(Header(1), "p", "s", "c");
 
@@ -29,7 +29,7 @@ public class IngestCoalescerTests
         var ticker = new ManualTicker();
         using var coalescer = new IngestCoalescer(ticker);
         var batches = new List<int>();
-        coalescer.BatchReady += (headers, _, _, _) => batches.Add(headers.Length);
+        coalescer.BatchReady += (headers, _, _, _, _) => batches.Add(headers.Length);
 
         coalescer.Enqueue(Header(1), "p1", "s1", "c1");
         coalescer.Enqueue(Header(2), "p2", "s2", "c2");
@@ -46,7 +46,7 @@ public class IngestCoalescerTests
         var ticker = new ManualTicker();
         using var coalescer = new IngestCoalescer(ticker);
         var raised = false;
-        coalescer.BatchReady += (_, _, _, _) => raised = true;
+        coalescer.BatchReady += (_, _, _, _, _) => raised = true;
 
         ticker.Fire();
 
@@ -59,7 +59,7 @@ public class IngestCoalescerTests
         var ticker = new ManualTicker();
         using var coalescer = new IngestCoalescer(ticker);
         var batches = new List<int>();
-        coalescer.BatchReady += (headers, _, _, _) => batches.Add(headers.Length);
+        coalescer.BatchReady += (headers, _, _, _, _) => batches.Add(headers.Length);
 
         coalescer.Enqueue(Header(1), "p", "s", "c");
         ticker.Fire();
@@ -74,7 +74,7 @@ public class IngestCoalescerTests
         var ticker = new ManualTicker();
         using var coalescer = new IngestCoalescer(ticker);
         string[]? subjects = null;
-        coalescer.BatchReady += (_, _, s, _) => subjects = s.ToArray();
+        coalescer.BatchReady += (_, _, s, _, _) => subjects = s.ToArray();
 
         coalescer.Enqueue(Header(1), null, "first", "c1");
         coalescer.Enqueue(Header(2), null, "second", "c2");
@@ -98,7 +98,7 @@ public class IngestCoalescerTests
         Assert.Equal(6, coalescer.UiDropped);
 
         var batchSize = -1;
-        coalescer.BatchReady += (headers, _, _, _) => batchSize = headers.Length;
+        coalescer.BatchReady += (headers, _, _, _, _) => batchSize = headers.Length;
         ticker.Fire();
 
         Assert.Equal(4, batchSize);
@@ -110,7 +110,7 @@ public class IngestCoalescerTests
         var ticker = new ManualTicker();
         var coalescer = new IngestCoalescer(ticker);
         var raised = false;
-        coalescer.BatchReady += (_, _, _, _) => raised = true;
+        coalescer.BatchReady += (_, _, _, _, _) => raised = true;
 
         coalescer.Dispose();
 
@@ -119,5 +119,40 @@ public class IngestCoalescerTests
         coalescer.Enqueue(Header(1), null, "s", "c");
         ticker.Fire(); // must be a no-op post-dispose: handler was unsubscribed
         Assert.False(raised);
+    }
+
+    [Fact]
+    public void Each_message_keeps_its_own_day_when_a_batch_spans_a_rollover()
+    {
+        var ticker = new ManualTicker();
+        using var coalescer = new IngestCoalescer(ticker);
+        string[]? days = null;
+        coalescer.BatchReady += (_, _, _, _, d) => days = d.ToArray();
+
+        // Staged either side of the writer's midnight rollover and flushed in one batch. Carrying
+        // the day per message rather than per batch is what keeps both halves resolvable: segment
+        // ids restart at 0 each day, so a single batch-wide day would point one half at the other
+        // day's bytes.
+        coalescer.Enqueue(Header(1), null, "s", "c", "2026-03-14");
+        coalescer.Enqueue(Header(2), null, "s", "c", "2026-03-15");
+        ticker.Fire();
+
+        Assert.NotNull(days);
+        Assert.Equal(["2026-03-14", "2026-03-15"], days);
+    }
+
+    [Fact]
+    public void A_message_enqueued_without_a_day_reports_an_empty_one()
+    {
+        var ticker = new ManualTicker();
+        using var coalescer = new IngestCoalescer(ticker);
+        string[]? days = null;
+        coalescer.BatchReady += (_, _, _, _, d) => days = d.ToArray();
+
+        coalescer.Enqueue(Header(1), null, "s", "c");
+        ticker.Fire();
+
+        Assert.NotNull(days);
+        Assert.Equal([string.Empty], days);
     }
 }

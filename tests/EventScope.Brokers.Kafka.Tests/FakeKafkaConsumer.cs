@@ -16,6 +16,7 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
     private readonly Queue<ConsumeResult<byte[], byte[]>?> _results = new();
     private readonly List<string> _subscribedTopics = [];
     private readonly List<TopicPartition> _assignedPartitions = [];
+    private readonly List<TopicPartitionOffset> _assignedOffsets = [];
 
     public int ConsumeCallCount { get; private set; }
 
@@ -29,6 +30,17 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
     /// single-partition path <see cref="KafkaEventSource"/> takes when
     /// <see cref="KafkaSourceOptions.Partition"/> is set, instead of <see cref="Subscribe(IEnumerable{string})"/>.</summary>
     public IReadOnlyList<TopicPartition> AssignedPartitions => _assignedPartitions;
+
+    /// <summary>Populated by <see cref="Assign(IEnumerable{TopicPartitionOffset})"/> — the path
+    /// taken only when a non-default start position needs an explicit seek. Latest must leave this
+    /// empty, which is how "the default path is unchanged" is actually proven.</summary>
+    public IReadOnlyList<TopicPartitionOffset> AssignedOffsets => _assignedOffsets;
+
+    /// <summary>Scripts <see cref="OffsetsForTimes"/>. Left null, that method keeps throwing, so a
+    /// start position that must not consult the broker is proven not to.</summary>
+    public List<TopicPartitionOffset>? OffsetsForTimesResult { get; set; }
+
+    public List<TopicPartitionTimestamp>? OffsetsForTimesQuery { get; private set; }
 
     /// <summary>Queues a result (or null, simulating a poll timeout) to be returned by the
     /// next <see cref="Consume"/> call.</summary>
@@ -103,7 +115,11 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
 
     public void Assign(TopicPartitionOffset partition) => throw new NotSupportedException();
 
-    public void Assign(IEnumerable<TopicPartitionOffset> partitions) => throw new NotSupportedException();
+    public void Assign(IEnumerable<TopicPartitionOffset> partitions)
+    {
+        _assignedOffsets.AddRange(partitions);
+        _assignedPartitions.AddRange(_assignedOffsets.Select(o => o.TopicPartition));
+    }
 
     public void Assign(IEnumerable<TopicPartition> partitions)
     {
@@ -142,8 +158,11 @@ internal sealed class FakeKafkaConsumer : IConsumer<byte[], byte[]>
     public Offset Position(TopicPartition partition) => throw new NotSupportedException();
 
     public List<TopicPartitionOffset> OffsetsForTimes(
-        IEnumerable<TopicPartitionTimestamp> timestampsToSearch, TimeSpan timeout) =>
-        throw new NotSupportedException();
+        IEnumerable<TopicPartitionTimestamp> timestampsToSearch, TimeSpan timeout)
+    {
+        OffsetsForTimesQuery = [.. timestampsToSearch];
+        return OffsetsForTimesResult ?? throw new NotSupportedException();
+    }
 
     public WatermarkOffsets GetWatermarkOffsets(TopicPartition topicPartition) => throw new NotSupportedException();
 

@@ -269,4 +269,96 @@ public sealed class ConnectionManagerViewModelTests
         Assert.DoesNotContain(vm.SavedConnections, c => c.Name == "abandoned");
         Assert.Empty(persisted);
     }
+
+    // --- Start position ---
+
+    private static void FillRequiredFields(ConnectionManagerViewModel vm, string name = "prod")
+    {
+        vm.EditName = name;
+        vm.EditBootstrapServers = "broker:9092";
+        vm.EditTopics = "orders";
+    }
+
+    [Fact]
+    public void A_new_connection_defaults_to_tailing_from_now()
+    {
+        var vm = Build(out _);
+        vm.NewKafkaConnectionCommand.Execute(null);
+
+        Assert.Equal("Latest", vm.EditStartFrom);
+        Assert.False(vm.IsStartFromEarliest);
+    }
+
+    [Fact]
+    public void Starting_at_an_offset_without_a_partition_is_rejected_with_the_reason()
+    {
+        var vm = Build(out var persisted);
+        vm.NewKafkaConnectionCommand.Execute(null);
+        FillRequiredFields(vm);
+        vm.EditStartFrom = "Offset";
+        vm.EditStartOffsetText = "12345";
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.True(vm.HasValidationError);
+        Assert.Contains("per-partition", vm.ValidationError);
+        Assert.Empty(persisted);
+    }
+
+    [Fact]
+    public void An_unparseable_start_timestamp_is_rejected()
+    {
+        var vm = Build(out var persisted);
+        vm.NewKafkaConnectionCommand.Execute(null);
+        FillRequiredFields(vm);
+        vm.EditStartFrom = "Timestamp";
+        vm.EditStartTimestampText = "last tuesday";
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.True(vm.HasValidationError);
+        Assert.Empty(persisted);
+    }
+
+    [Fact]
+    public void A_start_position_survives_save_and_reopening_the_editor()
+    {
+        // The failure this guards is a field missing from Clone: the form looks right, saves
+        // right, and silently loses the value the next time the connection is edited.
+        var vm = Build(out var persisted);
+        vm.NewKafkaConnectionCommand.Execute(null);
+        FillRequiredFields(vm);
+        vm.EditStartFrom = "Timestamp";
+        vm.EditStartTimestampText = "2026-08-29 10:00:00";
+
+        vm.SaveCommand.Execute(null);
+
+        var saved = Assert.Single(persisted[^1]);
+        Assert.Equal("Timestamp", saved.StartFrom);
+        Assert.Equal(new DateTime(2026, 8, 29, 10, 0, 0, DateTimeKind.Utc), saved.StartTimestampUtc);
+
+        vm.EditConnectionCommand.Execute(saved);
+
+        Assert.Equal("Timestamp", vm.EditStartFrom);
+        Assert.Equal("2026-08-29 10:00:00", vm.EditStartTimestampText);
+    }
+
+    [Fact]
+    public void Only_the_field_the_chosen_mode_uses_is_persisted()
+    {
+        // A leftover offset from trying one mode must not come back as a start position later.
+        var vm = Build(out var persisted);
+        vm.NewKafkaConnectionCommand.Execute(null);
+        FillRequiredFields(vm);
+        vm.EditPartitionText = "3";
+        vm.EditStartOffsetText = "999";
+        vm.EditStartFrom = "Earliest";
+
+        vm.SaveCommand.Execute(null);
+
+        var saved = Assert.Single(persisted[^1]);
+        Assert.Equal("Earliest", saved.StartFrom);
+        Assert.Null(saved.StartOffset);
+        Assert.Null(saved.StartTimestampUtc);
+    }
 }

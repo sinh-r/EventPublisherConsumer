@@ -92,7 +92,12 @@ public sealed class DeepScannerTests : IDisposable
         }
         ForceFlushToDisk(store);
 
-        var reports = new List<long>();
+        // A ConcurrentBag, not a List: Progress<T> delivers each report on its own thread-pool
+        // work item (see below), so several can be added genuinely concurrently. An unsynchronized
+        // List.Add there can lose a report outright rather than merely reorder it - which is what
+        // made this test fail intermittently under full-suite load, reporting [2,3,4,5], while
+        // passing every time it ran alone.
+        var reports = new System.Collections.Concurrent.ConcurrentBag<long>();
         var progress = new Progress<long>(reports.Add);
 
         await ScanAsync(store.Directory, "nonexistent", progress, Ct);

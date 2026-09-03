@@ -35,13 +35,24 @@ namespace EventScope.App.Collections;
 /// so those members are honest no-ops rather than stubs pretending to support something.
 /// </para>
 /// </summary>
-public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>, IDataGridCollectionView
+public sealed class MessageRowsView : IGridRowsView
 {
     private readonly int _capacity;
     private readonly MessageHeader[] _ring;
     private readonly string?[] _previews;
     private readonly string[] _subjects;
     private readonly string[] _correlationIds;
+
+    /// <summary>The day directory each row's payload was written under. A ring of references to
+    /// the one or two interned day strings live at any moment, not distinct strings — the array
+    /// costs a pointer per slot, nothing more.
+    ///
+    /// <para>Load-bearing for replay: a run that starts from a Kafka backlog files month-old
+    /// messages under <i>today</i>, so a row's broker timestamp says nothing about which directory
+    /// holds its bytes. Segment ids restart at 0 every day, so inferring the day from the timestamp
+    /// does not merely fail to find the payload — it can find a different message's bytes at the
+    /// same coordinates.</para></summary>
+    private readonly string[] _days;
 
     /// <summary>Total messages ever appended; also the sequence number of the next append.</summary>
     private long _head;
@@ -76,6 +87,7 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
         _previews = new string?[capacity];
         _subjects = new string[capacity];
         _correlationIds = new string[capacity];
+        _days = new string[capacity];
     }
 
     public event NotifyCollectionChangedEventHandler? CollectionChanged;
@@ -115,7 +127,21 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
         ReadOnlySpan<MessageHeader> headers,
         ReadOnlySpan<string?> previews,
         ReadOnlySpan<string> subjects,
-        ReadOnlySpan<string> correlationIds)
+        ReadOnlySpan<string> correlationIds) =>
+        AppendBatch(headers, previews, subjects, correlationIds, days: default);
+
+    /// <inheritdoc cref="AppendBatch(ReadOnlySpan{MessageHeader}, ReadOnlySpan{string}, ReadOnlySpan{string}, ReadOnlySpan{string})"/>
+    /// <param name="days">The day directory each row's payload was written under, parallel to
+    /// <paramref name="headers"/>. An empty span means no day is known and rows are stamped empty,
+    /// which is what the overload above passes and what leaves a row's payload to be resolved by
+    /// inference — see <see cref="_days"/> for why inference is not good enough once a backlog is
+    /// read.</param>
+    public void AppendBatch(
+        ReadOnlySpan<MessageHeader> headers,
+        ReadOnlySpan<string?> previews,
+        ReadOnlySpan<string> subjects,
+        ReadOnlySpan<string> correlationIds,
+        ReadOnlySpan<string> days)
     {
         for (var i = 0; i < headers.Length; i++)
         {
@@ -124,6 +150,7 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
             _previews[slot] = previews[i];
             _subjects[slot] = subjects[i];
             _correlationIds[slot] = correlationIds[i];
+            _days[slot] = i < days.Length ? days[i] : string.Empty;
             _head++;
         }
 
@@ -139,8 +166,8 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
     }
 
     /// <summary>Test-only convenience for appending a single already-known row.</summary>
-    public void Append(MessageHeader header, string? preview, string subject, string correlationId) =>
-        AppendBatch([header], [preview], [subject], [correlationId]);
+    public void Append(MessageHeader header, string? preview, string subject, string correlationId, string day = "") =>
+        AppendBatch([header], [preview], [subject], [correlationId], [day]);
 
     private void RecomputeFollowWindow(bool forceReset)
     {
@@ -182,7 +209,8 @@ public sealed class MessageRowsView : IList, IReadOnlyList<MessageRowViewModel>,
     private void PopulateAt(MessageRowViewModel vm, long sequence)
     {
         var slot = (int)(sequence % _capacity);
-        vm.Populate(sequence, in _ring[slot], _subjects[slot], _correlationIds[slot], _previews[slot]);
+        vm.Populate(
+            sequence, in _ring[slot], _subjects[slot], _correlationIds[slot], _previews[slot], _days[slot] ?? string.Empty);
 
         vm.IsSearchHit = _searchFilter.IsActive &&
             (_searchFilter.Matches(_previews[slot])

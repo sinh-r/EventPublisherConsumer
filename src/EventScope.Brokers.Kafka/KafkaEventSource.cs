@@ -46,8 +46,32 @@ public sealed class KafkaEventSource : IEventSource
 
         _consumerFactory = consumerFactory ?? (config => new ConsumerBuilder<byte[], byte[]>(config)
             .SetErrorHandler((_, error) => ErrorOccurred?.Invoke(new SourceError(error.Reason, error.IsFatal)))
+            // Where a non-default start position takes effect on the Subscribe path: partitions
+            // are not known until the group assigns them, and returning offsets from this handler
+            // is how librdkafka is told where to begin. See ResolveStartOffsets' remarks on why it
+            // is exposed rather than inlined here.
+            .SetPartitionsAssignedHandler((consumer, partitions) => ResolveStartOffsets(consumer, partitions))
             .Build());
     }
+
+    /// <summary>
+    /// The starting offsets for a freshly assigned set of partitions.
+    ///
+    /// <para>
+    /// Internal rather than a local lambda because it is otherwise untestable without a broker:
+    /// <c>SetPartitionsAssignedHandler</c> lives on <see cref="ConsumerBuilder"/>, and a test that
+    /// injects its own consumer factory bypasses the builder entirely, so the handler is never
+    /// attached. Widening the factory seam instead would have changed every call site. What this
+    /// does *not* prove is that librdkafka honours the returned offsets across a real rebalance —
+    /// only an integration test against a broker can show that.
+    /// </para>
+    /// </summary>
+    internal IReadOnlyList<TopicPartitionOffset> ResolveStartOffsets(
+        IConsumer<byte[], byte[]> consumer, IReadOnlyList<TopicPartition> partitions) =>
+        KafkaStartOffsets.Resolve(
+            partitions,
+            _options,
+            query => consumer.OffsetsForTimes(query, _options.OffsetLookupTimeout));
 
     public string DisplayName => "Kafka";
 
@@ -67,7 +91,8 @@ public sealed class KafkaEventSource : IEventSource
         SupportsSessions = false,
         // Kafka has no native dead-letter concept, unlike FakeEventSource's synthetic one.
         SupportsDeadLetterQueue = false,
-        // Seek-by-offset is real here — FakeEventSource can't replay anything.
+        // Real: a start position seeks assigned partitions to a beginning, timestamp or explicit
+        // offset (KafkaStartOffsets). FakeEventSource cannot replay anything.
         SupportsReplay = true,
         SupportsOffsetCommit = true,
     };
@@ -91,10 +116,24 @@ public sealed class KafkaEventSource : IEventSource
             {
                 // Assign, not Subscribe: an explicit partition means the caller wants exactly
                 // that partition's messages, not whatever the group-rebalance protocol would
-                // hand this throwaway group. Confluent.Kafka.AutoOffsetReset still governs the
-                // starting position, since a throwaway group has no committed offset to resume
-                // from either way.
-                consumer.Assign(_options.Topics.Select(t => new TopicPartition(t, new Partition(partition))));
+                // hand this throwaway group.
+                var assigned = _options.Topics
+                    .Select(t => new TopicPartition(t, new Partition(partition)))
+                    .ToList();
+
+                if (_options.StartFrom == KafkaStartFrom.Latest)
+                {
+                    // Unchanged from before start positions existed: no offsets, so
+                    // AutoOffsetReset governs — and for a throwaway group with no committed
+                    // offset that means tail from now.
+                    consumer.Assign(assigned);
+                }
+                else
+                {
+                    // Partitions are already known here, so the seek happens inline rather than
+                    // through the rebalance handler, which never fires for an explicit assignment.
+                    consumer.Assign(ResolveStartOffsets(consumer, assigned));
+                }
             }
             else
             {
@@ -154,7 +193,12 @@ public sealed class KafkaEventSource : IEventSource
             BootstrapServers = _options.BootstrapServers,
             GroupId = _groupId,
             EnableAutoCommit = false,
-            AutoOffsetReset = _options.AutoOffsetReset,
+            // Earliest is expressed both here and as a seek. Belt and braces: a partition added
+            // mid-run (a repartitioned topic) is assigned without going through this run's seek
+            // decision, and the reset is what covers it.
+            AutoOffsetReset = _options.StartFrom == KafkaStartFrom.Earliest
+                ? Confluent.Kafka.AutoOffsetReset.Earliest
+                : _options.AutoOffsetReset,
         };
 
         if (_options.SecurityProtocol is { } protocol) config.SecurityProtocol = protocol;

@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using EventScope.App.Collections;
 using EventScope.Storage.Search;
 
@@ -25,6 +26,24 @@ public partial class SearchViewModel : ObservableObject
     private readonly Func<FtsSearchService?> _searchServiceProvider;
     private CancellationTokenSource? _debounceCts;
 
+    private IReadOnlyList<SearchHit> _lastResults = [];
+    private string _lastResultsRoot = string.Empty;
+    private string _lastResultsQuery = string.Empty;
+
+    /// <summary>
+    /// Raised when the user asks to see the matches themselves rather than just their count —
+    /// carries the hits, the session root they came from (needed to read their payloads back), and
+    /// a label for the banner.
+    ///
+    /// <para>
+    /// This is a separate, explicit gesture rather than something the debounced search does on
+    /// every keystroke. FTS searches every day file on disk, so results routinely span past
+    /// sessions; swapping the grid out from under a live stream as you type would be hostile.
+    /// The instant ring tier keeps behaving exactly as it did.
+    /// </para>
+    /// </summary>
+    public event Action<IReadOnlyList<SearchHit>, string, string>? ResultsRequested;
+
     [ObservableProperty]
     public partial string Query { get; set; } = string.Empty;
 
@@ -49,6 +68,18 @@ public partial class SearchViewModel : ObservableObject
         _searchServiceProvider = searchServiceProvider;
     }
 
+    /// <summary>The matches from the last completed search, oldest first.</summary>
+    public IReadOnlyList<SearchHit> LastResults => _lastResults;
+
+    public bool HasResults => _lastResults.Count > 0;
+
+    /// <summary>Opens the last search's matches in the message grid. Enabled only once a search has
+    /// actually returned something — the count in the status text is what tells the user it is
+    /// worth pressing.</summary>
+    [RelayCommand(CanExecute = nameof(HasResults))]
+    private void ShowResults() =>
+        ResultsRequested?.Invoke(_lastResults, _lastResultsRoot, $"matches for “{_lastResultsQuery}”");
+
     partial void OnQueryChanged(string value)
     {
         // Instant tier: no delay, applies to whatever's already realized on screen.
@@ -62,6 +93,8 @@ public partial class SearchViewModel : ObservableObject
             _debounceCts = null;
             StatusText = string.Empty;
             IndexIsCurrent = true;
+            _lastResults = [];
+            ShowResultsCommand.NotifyCanExecuteChanged();
             return;
         }
 
@@ -91,16 +124,26 @@ public partial class SearchViewModel : ObservableObject
         IsSearching = true;
         try
         {
-            var count = 0;
+            var hits = new List<SearchHit>();
             long? hwm = null;
             await foreach (var hit in service.SearchBodyAsync(query, MaxResults, cts.Token).ConfigureAwait(true))
             {
-                count++;
+                hits.Add(hit);
                 hwm ??= hit.IndexHwm; // only the newest day's hwm - early exit means older days may never open
             }
 
             if (cts.IsCancellationRequested) return;
 
+            // FTS returns newest-first (newest day, then id DESC). The grid reads oldest-first in
+            // every other mode, so reverse here rather than silently inverting the reading
+            // direction when the user opens the results.
+            hits.Reverse();
+            _lastResults = hits;
+            _lastResultsRoot = service.RootDirectory;
+            _lastResultsQuery = query;
+            ShowResultsCommand.NotifyCanExecuteChanged();
+
+            var count = hits.Count;
             StatusText = count >= MaxResults ? $"{MaxResults}+ matches" : $"{count} match{(count == 1 ? "" : "es")}";
 
             // Compares the searched day's hwm against total rows this session has ingested so

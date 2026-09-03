@@ -20,6 +20,27 @@ public sealed record KafkaSourceOptions
     /// group's partition assignment.</summary>
     public string GroupIdPrefix { get; init; } = "eventscope";
 
+    /// <summary>Where a run starts. <see cref="KafkaStartFrom.Latest"/> — tail from now — is the
+    /// default, so nothing that does not opt in changes behaviour.</summary>
+    public KafkaStartFrom StartFrom { get; init; } = KafkaStartFrom.Latest;
+
+    /// <summary>The moment to start from when <see cref="StartFrom"/> is
+    /// <see cref="KafkaStartFrom.Timestamp"/>. Resolved per partition by the broker.</summary>
+    public DateTimeOffset? StartTimestampUtc { get; init; }
+
+    /// <summary>The offset to start from when <see cref="StartFrom"/> is
+    /// <see cref="KafkaStartFrom.Offset"/>. Only meaningful together with <see cref="Partition"/> —
+    /// offsets are per-partition, so one number applied across a whole topic means a different
+    /// message in each partition.</summary>
+    public long? StartOffset { get; init; }
+
+    /// <summary>How long the broker gets to answer an offset-for-timestamp lookup before the
+    /// affected partitions fall back to tailing.</summary>
+    public TimeSpan OffsetLookupTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>The low-level client setting. Derived from <see cref="StartFrom"/> for the two
+    /// modes it can express; the explicit modes seek instead. Kept settable because the
+    /// measurement scripts and the env-var path both construct options directly.</summary>
     public AutoOffsetReset AutoOffsetReset { get; init; } = AutoOffsetReset.Latest;
 
     /// <summary>When set, the source <c>Assign</c>s to this partition of <see cref="Topics"/>

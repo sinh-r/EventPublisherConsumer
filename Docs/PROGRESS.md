@@ -1284,7 +1284,7 @@ the real running app.
 
 ---
 
-## Stage 5a — connection manager and launcher (this pass)
+## Stage 5a — connection manager and launcher
 
 **Reprioritised at your direction**: Kafka being fully functional end-to-end, with no
 environment variables, took priority over M4 (Service Bus/SQS — both still empty project
@@ -1642,7 +1642,260 @@ Left alone on the assumption that `rsrishabh007/EventScope` is the intended home
 
 ---
 
+## Stage 5b — past events: history browsing and a Kafka start position
+
+Closes the gap that prompted this pass: **EventScope could only ever show live events.** It was
+true in two independent ways, both verified in code before anything was written.
+
+1. **The broker's backlog was skipped.** `KafkaSourceOptions.AutoOffsetReset` defaulted to
+   `Latest` and nothing overrode it — `EventSourceFactory.BuildKafkaSourceOptions` never set it and
+   `ConnectionProfile` had no field for it. With the throwaway group id and
+   `enable.auto.commit=false`, a fresh group has no committed offset, so "latest" meant literally
+   *tail from now*. `KafkaEventSource`'s own remarks said so.
+2. **The grid never read back what the app itself stored.** Everything was already persisted —
+   segments plus a SQLite row per message, day-rolled — but `MessageRowsView`'s only production
+   mutation path is `AppendBatch` from the live pipeline, and `Start()` handed the `SessionStore` to
+   the pipeline purely as a write target. Restart the app and the grid was empty while yesterday's
+   data sat on disk.
+
+Two symptoms of the same gap, both now closed: `Capabilities.SupportsReplay = true` was a promise
+no code kept (no `Seek`, `OffsetsForTimes` or `TopicPartitionOffset` existed anywhere in `src/`),
+and `FtsSearchService` already searched every historical day file but `SearchViewModel` counted the
+hits and threw the rows away.
+
+### A real bug found on the way, and why the obvious fix is unsafe
+
+`SessionStorePayloadReader` derives a message's day directory from `MessageHeader.EnqueuedTicks`.
+That is the **broker's** timestamp (`KafkaMessageMapper` maps
+`result.Message.Timestamp.UtcDateTime.Ticks`), while the directory a message is written to comes
+from the **writer's** clock (`SessionStore.CurrentDay`). Those agree only while tailing a live
+topic. The moment a backlog is read, month-old messages are filed under today and the reader looks
+for them under their original day — so the detail pane would report "payload evicted" for the entire
+backlog. A batch straddling midnight has the same problem in miniature, today.
+
+A "try the other days" fallback is **not** safe and was rejected: segment ids restart at 0 every
+day and offsets are dense, so `(segmentId 0, offset 512)` exists in most day files and refers to a
+different message in each. A blind fallback would silently render the wrong body — worse than an
+error in a tool whose whole job is telling you what a message actually contained.
+
+The fix is to carry the day rather than infer it. A row read back off disk knows the directory it
+came from (`SearchHit.Day`, set from the directory name, not from a timestamp), and
+`HistoryPayloadReaders.ForDay(day)` takes it as a parameter. `SessionLayout.DayFor` still exists for
+the live path and now documents in full that it is an inference and which way it fails.
+**Stamping the write day onto live ring rows is not done in this pass** — see Pending.
+
+### Storage
+
+- **`SessionLayout`** — the on-disk shape of a session root, split out of `SessionStore` so
+  read-only callers can find day files without constructing a store (whose constructor opens *and
+  creates* the current day's writer — exactly wrong for someone who only wants to read). Day
+  enumeration now also filters to names that parse as `yyyy-MM-dd`: the base root holds a
+  `{profileId:N}` directory per saved connection alongside its own day directories, and counting
+  those as days misreports what is on disk.
+- **`HistoryQueryService`** — plain paging over captured days, mirroring `FtsSearchService`'s
+  proven per-day read-only-connection pattern. Keyset paging (`WHERE m.id >= $from ORDER BY m.id`)
+  rather than `OFFSET`, so cost does not grow with scroll depth. `DaySummary.IsDense` checks the
+  contiguous-id invariant per day file rather than assuming it, and `PageByOffset` is the fallback
+  when it does not hold. Its core is synchronous because the grid's indexer is; `…Async` wrappers
+  offload to the pool for the browse-open summary sweep.
+- **`MessageRowQuery`** — one column list and one reader mapping shared by FTS and history paging,
+  so the two cannot drift into producing differently-shaped rows for the same message. `SearchHit`
+  gained `Partition` and `Flags` (the grid's PART column and its evicted/large/dead-lettered row
+  styling were dead without them) and is now documented as the shared read projection, with
+  `IndexHwm` meaningful only for search results (`IndexHwmNotApplicable` otherwise).
+- **`HistoryPayloadReaders`** — a day-keyed `SegmentReader` cache over a session root, day passed
+  in, no writer involved.
+- **`FtsSearchService` now takes a root path** instead of a `SessionStore`, so search works against
+  a connection that has never been started this run — which is the point of being able to look at
+  past captures.
+
+### App
+
+- **`HistoryRowsView`** — a sibling of `MessageRowsView` implementing the same
+  `IList` + `IReadOnlyList<MessageRowViewModel>` + `IDataGridCollectionView` contract, now factored
+  as `IGridRowsView`, backed by paged SQLite reads. Chosen over seeding the live ring, which would
+  have capped history at the ring's 65,536 rows and given its monotonic head sequence a second,
+  conflicting meaning.
+- **`DayRangePageSource`** — binary-searches day spans, bounded approximate-LRU page cache (256
+  rows/page, 32 pages), the same shape `SegmentReader` uses for decompressed blocks.
+  **`FixedResultsPageSource`** shows an already-materialized result set in the same grid.
+- **`SessionCatalog`** — finds captures on disk, including ones whose connection has since been
+  deleted (still browsable, labelled as such). The shared unnamespaced root is listed as one entry
+  named "Fake source & legacy sessions" with a note saying its contents are commingled and cannot be
+  told apart. That is unrecoverable after the fact, so it is named rather than hidden.
+- **`DetailPaneViewModel.LoadAsync` now takes an `IPayloadReader`** rather than an `IngestPipeline`,
+  which is what let a browsed row's body resolve with nothing running. Pinned fields moved to a
+  `PinnedFieldSource` for the same reason.
+- **Mode switching** — `MainWindowViewModel.ActiveRows` swaps the grid's source. Entering history
+  pins the live ring rather than stopping it, so capture continues and the existing "N new messages"
+  counter reports what arrived while you were reading.
+- **Search results are openable**, not just countable — an explicit "Show matches" gesture rather
+  than something the debounced search does per keystroke, which would swap the grid out from under a
+  live stream as you type. Results are reversed to oldest-first to match every other grid mode.
+
+### Kafka start position
+
+- **`KafkaStartOffsets`** — a pure resolver (`Latest`/`Earliest`/`Timestamp`/`Offset`) taking the
+  broker lookup as a delegate, which is where nearly all the behaviour lives and what makes it
+  testable without a broker. `Latest` resolves to `Offset.Unset` so `auto.offset.reset` still
+  governs and the default path is byte-for-byte what it was, not merely equivalent.
+- **The fallback for an unresolvable timestamp is `Offset.End`, never `Offset.Beginning`** — a
+  partition the broker did not answer for, or that has nothing at or after the requested time, must
+  not silently turn "the last hour" into "the entire retained topic". Asserted explicitly, including
+  the negative.
+- `Earliest` also sets `AutoOffsetReset.Earliest` in the config, covering a partition assigned
+  mid-run (a repartitioned topic) that never went through this run's seek decision.
+- Starting at an explicit offset requires an explicit partition — offsets are per-partition, so one
+  number across a subscribed topic means a different message in each. Rejected in the connection
+  editor *and* in the factory, so a hand-edited `connections.json` cannot get past it.
+- `SupportsReplay = true` is now honest.
+
+### Tests — 295 total, up from 235; all five assemblies green
+
+- `KafkaStartOffsetsTests` (9) — the resolver, including that a missing/errored partition tails
+  rather than replaying.
+- `KafkaEventSourceTests` (+6) — the Latest path still assigns *without* offsets (the regression
+  guard for every existing user), earliest/offset/timestamp seeks, and `ResolveStartOffsets` driven
+  directly via a new `InternalsVisibleTo`.
+- `FakeKafkaConsumer` widened for `Assign(IEnumerable<TopicPartitionOffset>)` and `OffsetsForTimes`,
+  keeping its "throws for anything the source must not touch" discipline: `OffsetsForTimes` still
+  throws unless a test scripts it, which is how "Latest never consults the broker" is proven.
+- `HistoryQueryServiceTests` (11) — paging, density, partition/flags projection, and that a row
+  reports the day it was *read from* rather than one inferred from its timestamp.
+- `HistoryRowsViewTests` (13) — realization, pooling, selection identity across a reset, and that an
+  unreadable row renders as unavailable instead of throwing out of the indexer.
+- `HistoryGridVirtualizationTests` (3) — headless, and the one that had to pass before any of this
+  was worth building: binding a 2,000,000-row history realizes ~15 rows, and **swapping the
+  DataGrid's `ItemsSource` between the live ring and history and back stays virtualized in both
+  directions**. Measured, because Stage 1 already paid once to learn that DataGrid silently wraps
+  and eagerly enumerates anything that is not an `IDataGridCollectionView`.
+- `HistoryViewModelTests` (8) — the feature end to end with no pipeline: write a capture, discover
+  it, list its days, open one, read a row's body back.
+- `EventSourceFactoryTests` (+5), `ConnectionManagerViewModelTests` (+5) — mapping, validation, and
+  a round-trip that would fail if a new field were missing from `Clone`.
+
+### One unrelated fix, taken because it was making the suite unreliable
+
+`DeepScannerTests.Reports_progress_once_per_message_scanned` was intermittently failing — twice in
+four full-suite runs, always as `[2,3,4,5]` against an expected `[1,2,3,4,5]`, and never once when
+run standalone. Pre-existing and unrelated to this pass. The test collected `Progress<T>` reports
+into a plain `List<long>`; its own comment already documented that `Progress<T>` delivers each
+report on a separate thread-pool work item with no `SynchronizationContext` installed, which means
+those adds are genuinely concurrent and can **lose** a report, not merely reorder it. Under
+full-suite load the pool is busy enough to hit it. Changed to a `ConcurrentBag<long>`; the ordering
+tolerance the test already had is unchanged. Green across three consecutive runs after.
+
+### Known limitations, stated rather than smoothed over
+
+- ~~**Live ring rows carry no day.**~~ Closed in Stage 5c below.
+- **The Subscribe-path seek is unverified against a real broker.** The rebalance handler is driven
+  directly in tests, but that librdkafka honours the returned offsets across a real rebalance can
+  only be shown by the opt-in integration test, which still has no broker on this machine (Blocked
+  item 5).
+- **Retention versus an open browse.** Page reads use short-lived `Pooling=False` connections and
+  `HistoryPayloadReaders` is disposed on leaving history, but segment handles held during an active
+  browse of a day retention wants to delete remain a window. `RetentionService`'s delete path is not
+  hardened against `IOException` in this pass.
+- **`DeepScanner` is still unwired.** Its overlay was not part of closing this gap.
+- **`MessageRowViewModel.Sequence` divergence, not fixed.** For live rows it is the *view's* window
+  sequence, while `InMemoryPayloadStore` is keyed by the *pipeline's* sequence, which restarts at 0
+  on every `Start()`. After a Stop/Start the hot tier can return a different message's body. Found
+  while designing this pass; pre-existing, untouched, and recorded here because it is the strongest
+  argument against ever seeding the live ring with history.
+
+---
+
+## Stage 5c — the replayed backlog is readable in the live grid (this pass)
+
+Stage 5b gave Kafka a start position, so a run can begin at `Earliest`, a timestamp or an explicit
+offset and then carry straight on into the live tail — past events *and* upcoming ones through one
+pipeline into one grid. It left one hole open, listed as the first Pending item, and this pass
+closes it: **the replayed half of that stream could not have its payloads read.**
+
+### Why a backlog broke payload reads specifically
+
+A message is filed under the day the **writer's** clock says, while `SessionStorePayloadReader`
+inferred the day from `EnqueuedTicks`, the **broker's** timestamp. Tailing a live topic those agree,
+which is why nothing noticed. Replay a backlog and every message is filed under *today* carrying a
+timestamp from weeks ago, so the inference looks in a directory that either does not exist — or,
+because segment ids restart at 0 every day and offsets are dense, holds **a different message at
+the same coordinates**. Not a missing body: the wrong body, silently, in a tool whose entire job is
+showing what a message contained.
+
+The hot in-memory ring hid this for the newest few thousand rows and hid it *inconsistently*, which
+is the worst shape for a bug like this — a small demo replay looks fine, a real one is wrong
+everywhere past the ring.
+
+### The fix: carry the day, never infer it
+
+The day now travels with the message from the writer that filed it, the same way `SearchHit.Day`
+already travelled with a row read back off disk:
+
+- **`IngestPipeline.Ingest`** reads `_sessionStore.CurrentDay` immediately after `EnsureCurrentDay()`
+  — the day the bytes it is about to append actually land in — and hands it to the coalescer.
+- **`IngestCoalescer`** carries it **per message**, not per batch, in a fourth parallel array. Per
+  batch would have been cheaper and is what the Pending item sketched, but a batch staged either
+  side of a midnight rollover holds messages from two directories, and stamping it with either day
+  points half its rows at the other day's bytes. The old note accepted that as "a handful of rows
+  within milliseconds of a boundary"; carrying it per message costs one reference per staged
+  message and makes the caveat disappear instead.
+- **`MessageRowsView`** keeps a parallel `string[]` day ring beside the preview/subject/correlation
+  rings it already had, and `MessageRowViewModel.Populate` stamps it — where it previously *cleared*
+  `Day` on every populate, which is what made a pooled row view model safe to recycle and is now
+  covered by its own test.
+- **`SessionStorePayloadReader`** takes an explicit day, falling back to inference only when handed
+  none. **`IngestPipeline.ReaderFor(day)`** is the live counterpart to history mode's `ReaderFor`,
+  still hot-ring-first with only the cold fallback pinned, so `OnSelectedRowChangedAsync` now reads
+  the same way in both modes.
+- **`DetailPaneViewModel`'s pinned-field lookup** had the identical inference, keyed by
+  `(segment_id, offset)` which is unique only *within* a day. Same fix.
+
+Every new parameter is defaulted or overloaded, so all six existing `AppendBatch` call sites and the
+whole `Enqueue` surface compile unchanged; only the `BatchReady` handler signature moved, in three
+test lambdas.
+
+### Tests — 304 total, up from 295; all five assemblies green
+
+`BacklogReplayDayTests` (7) and `IngestCoalescerTests` (+2). The one that carries the argument:
+**`Resolving_by_timestamp_returns_another_days_bytes_while_the_stamped_day_returns_the_real_ones`**
+stages the hazard rather than describing it — a real replayed payload written under today, and a
+decoy of identical length planted at the same `(segment, offset)` in the day the row's timestamp
+points at. Reading by the stamped day returns the real bytes; reading by inference returns the
+decoy. No exception, no empty buffer. The others cover the day surviving a pooled row view model's
+recycle, per-message days across a rollover inside one batch, a short/absent day span leaving rows
+empty, and a cold read through `ReaderFor` that first asserts the inferring reader finds *nothing*
+— otherwise the test would be asserting the hot ring, not the fix.
+
+### A pre-existing data-loss bug found while writing those tests
+
+The first draft of the decoy test disposed the `SessionStore` to seal the segment, then reopened one
+over the same root to read it back. The payload came back empty. Cause:
+`SessionStore.OpenCurrentDay` constructs `new SegmentWriter(Directory)` with the default
+`startingSegmentId: 0`, and `SegmentWriter.OpenNewSegment` opens with `FileMode.Create`. **Reopening
+a session root on the same UTC day truncates that day's segment 0**, while the SQLite rows pointing
+into it survive — so today's earlier capture becomes rows with unreadable bodies. `startingSegmentId`
+exists as a parameter and no caller has ever passed it, which suggests the recovery was intended and
+never wired. Untouched here: it is pre-existing, unrelated to replay, and the honest fix (resume at
+the highest segment id already on disk, and reconcile that with the roll logic) is its own change
+with its own risk. Recorded in Pending. The test now flushes by appending a >1 MB payload and keeps
+the store open, which is a better test anyway — it reads through the live writer's own directory.
+
+---
+
 ## Pending — in build-plan order
+
+- **Reopening a day truncates its segment 0 — data loss on same-day restart.** Found in Stage 5c
+  (see above). `SessionStore.OpenCurrentDay` always starts a `SegmentWriter` at segment 0 with
+  `FileMode.Create`. Fix: scan the day directory for existing segment files and resume past the
+  highest, then check that against `RollIfNeeded`'s assumptions and retention's deletes. Highest
+  value of anything in this list — it silently destroys already-captured payloads, and browsing past
+  captures is now a feature users can reach.
+- **Harden `RetentionService` against an open browse.** A `try/catch (IOException)` that defers to
+  the next tick rather than faulting the loop, for the case where a browse still holds a segment
+  handle on a day retention wants to delete.
+- **Wire `DeepScanner`.** Fully implemented and tested, still zero callers from `EventScope.App`.
+  Now that a day file is browsable it has somewhere to put its results, and UI spec §10 already
+  specifies the "Deep search running" overlay state.
 
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
   above) but still over the 50 MB budget. Not pursued further this pass since the return was

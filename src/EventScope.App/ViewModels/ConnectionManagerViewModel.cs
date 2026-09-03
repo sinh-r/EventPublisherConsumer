@@ -66,6 +66,31 @@ public partial class ConnectionManagerViewModel : ObservableObject
     [ObservableProperty]
     public partial string EditPartitionText { get; set; } = string.Empty;
 
+    /// <summary>A <c>StartFromOptions</c> member name.</summary>
+    [ObservableProperty]
+    public partial string EditStartFrom { get; set; } = "Latest";
+
+    /// <summary>UTC, <c>yyyy-MM-dd HH:mm:ss</c>. Only read when <see cref="EditStartFrom"/> is
+    /// <c>Timestamp</c>.</summary>
+    [ObservableProperty]
+    public partial string EditStartTimestampText { get; set; } = string.Empty;
+
+    /// <summary>Only read when <see cref="EditStartFrom"/> is <c>Offset</c>.</summary>
+    [ObservableProperty]
+    public partial string EditStartOffsetText { get; set; } = string.Empty;
+
+    /// <summary>Drives the conditional timestamp/offset inputs and the Earliest warning.</summary>
+    public bool IsStartFromTimestamp => EditStartFrom == "Timestamp";
+    public bool IsStartFromOffset => EditStartFrom == "Offset";
+    public bool IsStartFromEarliest => EditStartFrom == "Earliest";
+
+    partial void OnEditStartFromChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsStartFromTimestamp));
+        OnPropertyChanged(nameof(IsStartFromOffset));
+        OnPropertyChanged(nameof(IsStartFromEarliest));
+    }
+
     [ObservableProperty]
     public partial string EditSecurityProtocol { get; set; } = NoneOption;
 
@@ -125,6 +150,11 @@ public partial class ConnectionManagerViewModel : ObservableObject
     public static IReadOnlyList<string> SaslMechanismOptions { get; } =
         [NoneOption, "Plain", "ScramSha256", "ScramSha512", "Gssapi", "OAuthBearer"];
 
+    /// <summary>KafkaStartFrom member names. Latest is first because it is the default and the
+    /// only one that reads nothing already on the topic.</summary>
+    public static IReadOnlyList<string> StartFromOptions { get; } =
+        ["Latest", "Earliest", "Timestamp", "Offset"];
+
     public ConnectionManagerViewModel(
         IReadOnlyList<ConnectionProfile> initialConnections,
         Action<IReadOnlyList<ConnectionProfile>> persist,
@@ -154,6 +184,9 @@ public partial class ConnectionManagerViewModel : ObservableObject
         EditPublishTopic = string.Empty;
         EditGroupIdPrefix = "eventscope";
         EditPartitionText = string.Empty;
+        EditStartFrom = "Latest";
+        EditStartTimestampText = string.Empty;
+        EditStartOffsetText = string.Empty;
         EditSecurityProtocol = NoneOption;
         EditSaslMechanism = NoneOption;
         EditSaslUsername = string.Empty;
@@ -178,6 +211,9 @@ public partial class ConnectionManagerViewModel : ObservableObject
         EditPublishTopic = profile.PublishTopic;
         EditGroupIdPrefix = profile.GroupIdPrefix;
         EditPartitionText = profile.Partition?.ToString() ?? string.Empty;
+        EditStartFrom = profile.StartFrom ?? "Latest";
+        EditStartTimestampText = profile.StartTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? string.Empty;
+        EditStartOffsetText = profile.StartOffset?.ToString() ?? string.Empty;
         EditSecurityProtocol = profile.SecurityProtocol ?? NoneOption;
         EditSaslMechanism = profile.SaslMechanism ?? NoneOption;
         EditSaslUsername = profile.SaslUsername ?? string.Empty;
@@ -317,6 +353,17 @@ public partial class ConnectionManagerViewModel : ObservableObject
 
     private void Persist() => _persist(SavedConnections.Where(c => c.Id != ConnectionProfile.FakeSourceId).ToList());
 
+    /// <summary>Parses the start timestamp as UTC. Invariant and exact rather than
+    /// locale-dependent: a start position that means a different moment on a differently-configured
+    /// machine is worse than one that refuses an ambiguous input.</summary>
+    private bool TryParseStartTimestamp(out DateTime value) =>
+        DateTime.TryParseExact(
+            EditStartTimestampText?.Trim(),
+            ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"],
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out value);
+
     private bool TryValidate(out string error)
     {
         if (string.IsNullOrWhiteSpace(EditName))
@@ -343,6 +390,29 @@ public partial class ConnectionManagerViewModel : ObservableObject
             return false;
         }
 
+        if (IsStartFromTimestamp && !TryParseStartTimestamp(out _))
+        {
+            error = "Start timestamp must be UTC in the form yyyy-MM-dd HH:mm:ss.";
+            return false;
+        }
+
+        if (IsStartFromOffset)
+        {
+            if (!long.TryParse(EditStartOffsetText, out var offset) || offset < 0)
+            {
+                error = "Start offset must be a whole number of zero or more.";
+                return false;
+            }
+
+            // Offsets are per-partition, so "start at 12345" across a subscribed topic would mean a
+            // different message in every partition. Refuse rather than quietly do something odd.
+            if (!int.TryParse(EditPartitionText, out _))
+            {
+                error = "Starting at an offset needs an explicit partition — offsets are per-partition.";
+                return false;
+            }
+        }
+
         error = string.Empty;
         return true;
     }
@@ -357,6 +427,14 @@ public partial class ConnectionManagerViewModel : ObservableObject
         profile.PublishTopic = EditPublishTopic.Trim();
         profile.GroupIdPrefix = string.IsNullOrWhiteSpace(EditGroupIdPrefix) ? "eventscope" : EditGroupIdPrefix.Trim();
         profile.Partition = int.TryParse(EditPartitionText, out var partition) ? partition : null;
+
+        profile.StartFrom = EditStartFrom;
+        // Only the field the chosen mode actually uses is persisted, so a half-filled input left
+        // over from trying another mode cannot come back later as a surprise start position.
+        profile.StartTimestampUtc = IsStartFromTimestamp && TryParseStartTimestamp(out var startAt) ? startAt : null;
+        profile.StartOffset = IsStartFromOffset && long.TryParse(EditStartOffsetText, out var startOffset)
+            ? startOffset
+            : null;
         profile.SecurityProtocol = EditSecurityProtocol == NoneOption ? null : EditSecurityProtocol;
         profile.SaslMechanism = EditSaslMechanism == NoneOption ? null : EditSaslMechanism;
         profile.SaslUsername = string.IsNullOrWhiteSpace(EditSaslUsername) ? null : EditSaslUsername.Trim();
@@ -399,6 +477,9 @@ public partial class ConnectionManagerViewModel : ObservableObject
         PublishTopic = source.PublishTopic,
         GroupIdPrefix = source.GroupIdPrefix,
         Partition = source.Partition,
+        StartFrom = source.StartFrom,
+        StartTimestampUtc = source.StartTimestampUtc,
+        StartOffset = source.StartOffset,
         SecurityProtocol = source.SecurityProtocol,
         SaslMechanism = source.SaslMechanism,
         SaslUsername = source.SaslUsername,

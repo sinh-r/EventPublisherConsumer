@@ -76,6 +76,21 @@ public sealed class IngestPipeline : IAsyncDisposable
     /// than looking one up here.</summary>
     public IPayloadReader PayloadReader { get; }
 
+    /// <summary>
+    /// The reader for a row that knows which day it was written under — the live grid's
+    /// counterpart to history mode's <c>ReaderFor</c>, and the path every selected row should take.
+    /// Still hot-ring-first: a row young enough to be in the in-memory ring never touches disk, and
+    /// only the cold fallback is pinned to <paramref name="day"/>.
+    ///
+    /// <para>An empty <paramref name="day"/> hands back the inferring reader unchanged, so a row
+    /// appended before a day was known behaves exactly as it did. One small object per selection —
+    /// this is called when the user clicks a row, not per message.</para>
+    /// </summary>
+    public IPayloadReader ReaderFor(string? day) =>
+        string.IsNullOrEmpty(day)
+            ? PayloadReader
+            : new CompositePayloadReader(_hotStore, new SessionStorePayloadReader(_sessionStore, day));
+
     public long UiDropped => _coalescer.UiDropped;
     public long ByteBudgetUsed => _byteBudget.Used;
     public long ByteBudgetLimit => _byteBudget.Limit;
@@ -128,6 +143,12 @@ public sealed class IngestPipeline : IAsyncDisposable
     {
         _sessionStore.EnsureCurrentDay();
 
+        // Read once, immediately after the rollover check, and carry it all the way to the grid
+        // row. This is the day the bytes below are actually written under, which is the only thing
+        // that can locate them again — a replayed backlog's messages are filed under today no
+        // matter how old their broker timestamps are.
+        var day = _sessionStore.CurrentDay;
+
         var sequence = _sequence++;
         var subject = message.Subject ?? string.Empty;
         var correlationId = message.CorrelationId ?? string.Empty;
@@ -173,7 +194,7 @@ public sealed class IngestPipeline : IAsyncDisposable
             Preview: preview,
             BodyHead: bodyHead));
 
-        _coalescer.Enqueue(header, preview, subject, correlationId);
+        _coalescer.Enqueue(header, preview, subject, correlationId, day);
     }
 
     /// <summary>Decodes only enough of the body to cover <paramref name="maxChars"/> (a
@@ -216,8 +237,9 @@ public sealed class IngestPipeline : IAsyncDisposable
         ReadOnlyMemory<MessageHeader> headers,
         ReadOnlyMemory<string?> previews,
         ReadOnlyMemory<string> subjects,
-        ReadOnlyMemory<string> correlationIds) =>
-        _rows.AppendBatch(headers.Span, previews.Span, subjects.Span, correlationIds.Span);
+        ReadOnlyMemory<string> correlationIds,
+        ReadOnlyMemory<string> days) =>
+        _rows.AppendBatch(headers.Span, previews.Span, subjects.Span, correlationIds.Span, days.Span);
 
     public async ValueTask DisposeAsync()
     {

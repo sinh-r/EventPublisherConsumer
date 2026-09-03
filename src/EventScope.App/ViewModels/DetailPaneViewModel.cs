@@ -1,5 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using EventScope.App.Ingest;
+using EventScope.Core.Abstractions;
 using EventScope.Core.Models;
 using EventScope.Storage.Sqlite;
 using Microsoft.Data.Sqlite;
@@ -41,7 +41,7 @@ public partial class DetailPaneViewModel : ObservableObject
 
     private CancellationTokenSource? _cts;
 
-    public async Task LoadAsync(MessageRowViewModel? row, IngestPipeline? pipeline, SessionStore? sessionStore)
+    public async Task LoadAsync(MessageRowViewModel? row, IPayloadReader? payloadReader, PinnedFieldSource? pinnedFields)
     {
         _cts?.Cancel();
         _cts?.Dispose();
@@ -55,7 +55,7 @@ public partial class DetailPaneViewModel : ObservableObject
         UnavailableReason = string.Empty;
         PinnedFieldsText = string.Empty;
 
-        if (row is null || pipeline is null)
+        if (row is null || payloadReader is null)
         {
             return;
         }
@@ -68,7 +68,7 @@ public partial class DetailPaneViewModel : ObservableObject
         // a feature most rows never use. A quick on-demand read here, mirroring how the
         // payload itself is already read on demand, is the proportionate choice - see
         // PROGRESS.md's step 7 entry for the full reasoning.
-        _ = LoadPinnedFieldsAsync(row, sessionStore, cts.Token);
+        _ = LoadPinnedFieldsAsync(row, pinnedFields, cts.Token);
 
         if (row.IsLarge)
         {
@@ -105,7 +105,7 @@ public partial class DetailPaneViewModel : ObservableObject
             flags: MessageFlags.None);
 
         var delayTask = Task.Delay(50, cts.Token);
-        var readTask = pipeline.PayloadReader.ReadAsync(header, cts.Token).AsTask();
+        var readTask = payloadReader.ReadAsync(header, cts.Token).AsTask();
 
         var first = await Task.WhenAny(delayTask, readTask).ConfigureAwait(true);
         if (cts.IsCancellationRequested) return;
@@ -138,18 +138,24 @@ public partial class DetailPaneViewModel : ObservableObject
         BodyText = System.Text.Encoding.UTF8.GetString(bytes.Span);
     }
 
-    private async Task LoadPinnedFieldsAsync(MessageRowViewModel row, SessionStore? sessionStore, CancellationToken ct)
+    private async Task LoadPinnedFieldsAsync(MessageRowViewModel row, PinnedFieldSource? source, CancellationToken ct)
     {
-        if (sessionStore is null || sessionStore.PinnedFields.Count == 0) return;
+        if (source is null || source.Fields.Count == 0) return;
 
-        var day = new DateTime(row.Time.Ticks, DateTimeKind.Utc).ToString("yyyy-MM-dd");
-        var dbPath = System.IO.Path.Combine(sessionStore.RootDirectory, day, $"{day}.db");
+        // The day the row actually names, falling back to its timestamp only when it names none.
+        // (segment_id, offset) is unique per message *within a day*, so looking in the wrong day
+        // file can match a different message's row - the same hazard the payload read has.
+        var day = string.IsNullOrEmpty(row.Day)
+            ? SessionLayout.DayFor(row.Time.Ticks)
+            : row.Day;
+
+        var dbPath = SessionLayout.DayDatabasePath(source.RootDirectory, day);
         if (!File.Exists(dbPath)) return;
 
         // No SQLite row id travels on MessageRowViewModel (it's an in-memory ring sequence,
         // not the day file's autoincrement id) - (segment_id, offset) is what's actually
         // unique per message within a day, so that's the lookup key here.
-        var fields = sessionStore.PinnedFields;
+        var fields = source.Fields;
         var columns = string.Join(", ", fields.Select(f => $"\"{PinnedFieldsSchema.ColumnName(f.Name)}\""));
 
         try

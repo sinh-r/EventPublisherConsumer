@@ -25,9 +25,15 @@ and **AWS SQS**, without switching between three vendor consoles.
   consumer group with auto-commit disabled, so running this tool never disturbs a real
   consumer group's offsets or lag. SQS (once M4 lands) cannot peek without consuming, and
   the UI will say so permanently rather than hiding it.
-- **Everything is kept.** Messages stream to a local append-only log (LZ4-compressed
-  segments) with a SQLite index, day-file rolling, and capped retention with eviction — so
-  you can scroll back through a saturated run instead of watching lines disappear.
+- **Everything is kept, and you can go back to it.** Messages stream to a local append-only log
+  (LZ4-compressed segments) with a SQLite index, day-file rolling, and capped retention with
+  eviction. Reopen the app and **History** browses every capture still on disk — pick a day, scroll
+  it, read any message body — with no connection running and nothing sent to the broker.
+- **Start where you want, not just from now.** A connection can begin at the latest offset (the
+  default: tail from now), the earliest the topic still retains, a timestamp, or an explicit offset
+  on a chosen partition — so the messages that arrived before you opened the tool are not lost to
+  you. Still non-destructive: the throwaway group and disabled auto-commit mean reading a backlog
+  never touches a real consumer group.
 - **Search that works on volume.** Full-text search over message bodies (FTS5), trigram
   infix search on message and correlation IDs, and a streaming deep scan for anything the
   index doesn't cover yet.

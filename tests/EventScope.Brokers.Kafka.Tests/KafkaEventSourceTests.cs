@@ -168,6 +168,136 @@ public sealed class KafkaEventSourceTests
         Assert.Equal(3, assigned.Partition.Value);
     }
 
+    // --- Start position (build plan: what makes SupportsReplay honest) ---
+
+    [Fact]
+    public async Task The_default_start_position_assigns_without_offsets_so_nothing_changes()
+    {
+        // The regression guard for every existing user: Latest must take the same code path it
+        // always did, leaving the starting position to auto.offset.reset.
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            Partition = 3,
+        });
+        fake.Enqueue(MakeResult(partition: 3));
+
+        await RunOneMessageAsync(source, Ct);
+
+        Assert.Empty(fake.AssignedOffsets);
+        Assert.Single(fake.AssignedPartitions);
+    }
+
+    [Fact]
+    public async Task Earliest_assigns_the_partition_at_the_beginning()
+    {
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            Partition = 3,
+            StartFrom = KafkaStartFrom.Earliest,
+        });
+        fake.Enqueue(MakeResult(partition: 3));
+
+        await RunOneMessageAsync(source, Ct);
+
+        var assigned = Assert.Single(fake.AssignedOffsets);
+        Assert.Equal(Offset.Beginning, assigned.Offset);
+        Assert.Equal(3, assigned.TopicPartition.Partition.Value);
+    }
+
+    [Fact]
+    public async Task Earliest_also_sets_auto_offset_reset_for_a_partition_assigned_mid_run()
+    {
+        // Belt and braces: a topic repartitioned while streaming assigns partitions that never went
+        // through this run's seek decision, and the reset is what covers them.
+        var captured = new TaskCompletionSource<ConsumerConfig>();
+        var fake = new FakeKafkaConsumer();
+        var source = new KafkaEventSource(
+            new KafkaSourceOptions
+            {
+                BootstrapServers = "broker:9092",
+                Topics = ["orders"],
+                StartFrom = KafkaStartFrom.Earliest,
+            },
+            config => { captured.TrySetResult(config); return fake; });
+
+        var channel = Channel.CreateUnbounded<RawMessage>();
+        using var cts = new CancellationTokenSource();
+        var runTask = source.RunAsync(channel.Writer, cts.Token);
+
+        var config = await captured.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
+
+        Assert.Equal(AutoOffsetReset.Earliest, config.AutoOffsetReset);
+
+        await StopAsync(cts, runTask);
+    }
+
+    [Fact]
+    public async Task An_explicit_offset_assigns_that_offset()
+    {
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            Partition = 3,
+            StartFrom = KafkaStartFrom.Offset,
+            StartOffset = 12_345,
+        });
+        fake.Enqueue(MakeResult(partition: 3));
+
+        await RunOneMessageAsync(source, Ct);
+
+        Assert.Equal(new Offset(12_345), Assert.Single(fake.AssignedOffsets).Offset);
+    }
+
+    [Fact]
+    public async Task A_timestamp_start_asks_the_broker_where_that_moment_is()
+    {
+        var at = new DateTimeOffset(2026, 8, 29, 10, 0, 0, TimeSpan.Zero);
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            Partition = 3,
+            StartFrom = KafkaStartFrom.Timestamp,
+            StartTimestampUtc = at,
+        });
+        fake.OffsetsForTimesResult =
+            [new TopicPartitionOffset(new TopicPartition("orders", new Partition(3)), new Offset(880))];
+        fake.Enqueue(MakeResult(partition: 3));
+
+        await RunOneMessageAsync(source, Ct);
+
+        Assert.NotNull(fake.OffsetsForTimesQuery);
+        Assert.Equal(at.UtcDateTime, Assert.Single(fake.OffsetsForTimesQuery!).Timestamp.UtcDateTime);
+        Assert.Equal(new Offset(880), Assert.Single(fake.AssignedOffsets).Offset);
+    }
+
+    [Fact]
+    public void The_rebalance_hook_resolves_offsets_for_the_subscribe_path()
+    {
+        // The Subscribe path's seek runs from a ConsumerBuilder handler, which an injected consumer
+        // factory bypasses entirely - so this drives the adapter directly. What it does NOT prove
+        // is that librdkafka honours the returned offsets across a real rebalance; only the opt-in
+        // integration test against a broker can show that.
+        var (source, fake) = Build(new KafkaSourceOptions
+        {
+            BootstrapServers = "test:9092",
+            Topics = ["orders"],
+            StartFrom = KafkaStartFrom.Earliest,
+        });
+
+        var resolved = source.ResolveStartOffsets(
+            fake,
+            [new TopicPartition("orders", new Partition(0)), new TopicPartition("orders", new Partition(1))]);
+
+        Assert.Equal(2, resolved.Count);
+        Assert.All(resolved, r => Assert.Equal(Offset.Beginning, r.Offset));
+    }
+
     // --- Mapping rules ---
 
     [Fact]

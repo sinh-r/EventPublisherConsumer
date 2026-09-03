@@ -46,8 +46,28 @@ public static class EventSourceFactory
         var topics = profile.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         ConnectionSecretProtector.TryUnprotect(profile.SaslPasswordProtected, out var password);
 
+        // An unparseable or absent value means Latest, matching every connection saved before start
+        // positions existed - same tolerant shape as the SecurityProtocol/SaslMechanism parses below.
+        var startFrom = Enum.TryParse<KafkaStartFrom>(profile.StartFrom, out var parsed)
+            ? parsed
+            : KafkaStartFrom.Latest;
+
+        // "Start at offset N" across a subscribed topic would mean offset N in *every* partition,
+        // which is essentially never what anyone means. The connection editor blocks this too; the
+        // check is repeated here so the factory cannot be talked into it by a hand-edited file.
+        if (startFrom == KafkaStartFrom.Offset && profile.Partition is null)
+        {
+            throw new NotSupportedException(
+                "Starting at an explicit offset needs an explicit partition — offsets are per-partition.");
+        }
+
         return new KafkaSourceOptions
         {
+            StartFrom = startFrom,
+            StartTimestampUtc = profile.StartTimestampUtc is { } at
+                ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc))
+                : null,
+            StartOffset = profile.StartOffset,
             BootstrapServers = profile.BootstrapServers,
             Topics = topics.Length > 0 ? topics : ["eventscope"],
             GroupIdPrefix = string.IsNullOrWhiteSpace(profile.GroupIdPrefix) ? "eventscope" : profile.GroupIdPrefix,

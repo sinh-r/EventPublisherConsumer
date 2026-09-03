@@ -99,16 +99,7 @@ public sealed class SessionStore : IDisposable
 
     /// <summary>Every day directory under the root, oldest first — lexicographic order matches
     /// chronological order for <c>yyyy-MM-dd</c> names.</summary>
-    public IReadOnlyList<string> ListDayDirectories()
-    {
-        if (!System.IO.Directory.Exists(_rootDirectory)) return [];
-
-        return System.IO.Directory.GetDirectories(_rootDirectory)
-            .Select(System.IO.Path.GetFileName)
-            .OfType<string>()
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToList();
-    }
+    public IReadOnlyList<string> ListDayDirectories() => SessionLayout.ListDayDirectories(_rootDirectory);
 
     /// <summary>Posts a flags update for one segment's rows in <paramref name="day"/>'s file.
     /// Routes through the live writer if <paramref name="day"/> is the currently active day —
