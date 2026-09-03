@@ -2013,6 +2013,26 @@ reach, so a truncated day is something they will actually notice.
 Everyone on `v0.3.0` should move to `v0.3.1` — anyone who switches connection tabs, or reopens the
 app twice in a day, is hitting this.
 
+### Outcome — shipped and verified
+
+Run [33797179702](https://github.com/sinh-r/EventPublisherConsumer/actions/runs/33797179702),
+conclusion `success`. Verified by downloading the published assets rather than by trusting the run's
+logs, the same checks `v0.3.0` got:
+
+- `EventScope.exe` (122.89 MB) and `EventScope.exe.sha256` attached to
+  <https://github.com/sinh-r/EventPublisherConsumer/releases/tag/v0.3.1>, not a draft, and
+  `releases/latest` reports `v0.3.1`.
+- **Published hash matches the asset** — recomputed SHA256 `3882C6E0…BF362E4F`, identical to the
+  published `.sha256`.
+- **Stamped from the tagged commit** — `FileVersion 0.3.1.0`,
+  `ProductVersion 0.3.1+0821e7401d34831de890701dc9c3fa89626f44f2`.
+- **Provenance attestation resolves** for that digest, subject `EventScope.exe`, repository
+  `sinh-r/EventPublisherConsumer`, ref `refs/tags/v0.3.1`.
+
+Still unsigned, and SmartScreen reputation is per-hash, so `v0.3.1` starts from zero exactly as
+`v0.3.0` did. **The exe was downloaded and inspected, not run** — that it launches on a clean
+machine remains untested, as for every release so far.
+
 ---
 
 ## Pending — in build-plan order
