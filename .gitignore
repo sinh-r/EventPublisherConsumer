@@ -4,6 +4,13 @@ obj/
 out/
 publish/
 
+## Built or downloaded binaries, anywhere in the tree. The bin/ and publish/ rules above
+## only cover where the build puts them; a release exe downloaded for verification and left
+## somewhere else is exactly as unwelcome, and at ~123 MB it is rejected by GitHub's 100 MB
+## file limit at push time rather than at commit time.
+*.exe
+*.msi
+
 ## User-specific
 *.user
 *.suo

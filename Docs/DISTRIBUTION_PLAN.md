@@ -287,8 +287,39 @@ developers who already have Scoop.
 It does nothing for a user who clicks the `.exe` link on the Releases page, and
 nothing for Smart App Control.
 
-- [ ] Create a second repository named `scoop-EventScope`.
-- [ ] Add `bucket/EventScope.json`:
+**Prepared and committed at `D:\My Work\scoop-EventScope`** (a local git repo with one
+commit, ready to push). What is actually there differs from the sketch below in four ways,
+each deliberate:
+
+- **`checkver` is `{"github": "<repo url>"}`**, not the bare string `"github"`. The bare form
+  needs the manifest's `homepage` to be the repo; being explicit survives `homepage` changing.
+- **`autoupdate` carries a `hash` block** pointing at the release's published
+  `EventScope.exe.sha256` with regex `([a-fA-F0-9]{64})`. Without it, autoupdate rewrites the
+  URL and version but leaves a stale hash, and the install fails looking like tampering.
+  Verified against the live v0.2.1 release: the regex extracts exactly the pinned hash.
+- **No `persist` block, deliberately.** EventScope writes only to `%LOCALAPPDATA%\EventScope`
+  (`settings.json`, `connections.json`, `sessions/`) and nothing beside the executable, so
+  `scoop update` replacing the install directory cannot lose saved connections.
+- **The `#/EventScope.exe` URL fragment is omitted.** The URL's basename is already
+  `EventScope.exe`, so the rename fragment is noise — and it would corrupt any `$url`-derived
+  path in the autoupdate block.
+
+The repo also carries `excavator.yml` to refresh the manifest automatically, flagged in its
+own header as using a third-party action whose current inputs could not be verified.
+
+- [x] Create a second repository named `scoop-EventScope`. *(Prepared locally; creating and
+      pushing the GitHub repo is yours — see the commands in that repo's README.)*
+- [x] Add `bucket/EventScope.json` — pinned to v0.2.1, hash
+      `21c326c5…9461ad`, verified by downloading the release asset and recomputing.
+- [x] Add to the README install section. Scoop now leads the Install section, ahead of the
+      direct download, since it is the path that avoids the prompt.
+- [ ] Test end to end on a clean machine or VM. **Not done — Scoop is not installed on the
+      dev machine, so `scoop install` was never actually run.** What was verified instead:
+      the manifest parses, the download URL resolves, the `.sha256` URL is reachable and its
+      content matches the pinned hash under the autoupdate regex, and `releases/latest`
+      reports `v0.2.1` as `checkver` expects. A real install is still the check that matters.
+
+The original sketch, kept for reference:
 
 ```json
 {
@@ -314,15 +345,6 @@ nothing for Smart App Control.
   }
 }
 ```
-
-- [ ] Add to the README install section:
-
-```
-scoop bucket add EventScope https://github.com/rsrishabh007/scoop-EventScope
-scoop install EventScope
-```
-
-- [ ] Test end to end on a clean machine or VM.
 
 ---
 

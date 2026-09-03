@@ -1595,6 +1595,43 @@ Not verified: startup on a machine with no .NET runtime installed. This one has 
 the self-contained claim is inferred from the publish flags rather than demonstrated. Worth a
 single check on a clean machine if one is ever to hand.
 
+**Follow-on — SmartScreen on other machines, and the Scoop bucket (Phase 3).** Downloading
+the release on a machine other than the dev box produces *"EventScope.exe isn't commonly
+downloaded"*, then a second prompt on **Keep**. Worth being precise about what that is: a
+**reputation** verdict, not a detection. SmartScreen vouches for a file either by its
+publisher's Authenticode signature or by download volume for that exact hash; an unsigned
+binary published hours ago has neither, so it correctly reports that it cannot vouch. The
+"report this app as safe" link it offers is a dead end — that process is per file hash, and
+every release is a new hash, so anything earned for `v0.2.1` resets at `v0.2.2`.
+
+Signing is the real fix and is still Phase 4 (SignPath Foundation, unapplied). Phase 3 is what
+was available today and needed nobody's approval:
+
+- **Scoop bucket prepared** at `D:\My Work\scoop-EventScope` — one commit, ready to push;
+  creating the GitHub repo is yours. `scoop install` fetches through Scoop's own client, so
+  the file never gets Mark-of-the-Web and neither prompt appears. It does nothing for someone
+  clicking the `.exe` link on the Releases page, and nothing for Smart App Control.
+- **The manifest was verified against the live release, not assumed.** The published
+  `EventScope.exe.sha256` is reachable and the `autoupdate` regex extracts exactly the pinned
+  hash; `releases/latest` reports `v0.2.1`, which is what `checkver` reads. Four deliberate
+  departures from `DISTRIBUTION_PLAN.md`'s sketch are recorded in that document's Phase 3 —
+  the important one being that the sketch had no `autoupdate.hash` block, which would have
+  left a stale hash on every future release and failed installs in a way that looks like
+  tampering rather than neglect.
+- **No `persist` block, and that is a property of the app worth knowing:** everything
+  EventScope writes lives in `%LOCALAPPDATA%\EventScope` (`settings.json`, `connections.json`,
+  `sessions/`), nothing beside the executable, so `scoop update` replacing the install
+  directory cannot lose saved connections.
+- **README rewritten around the actual question a downloader asks.** The Install section now
+  leads with Scoop; the SmartScreen section explains reputation-versus-detection and points at
+  `gh attestation verify`, which is a genuinely stronger check than a signature and was
+  previously mentioned as existing but never shown.
+
+**Not verified: `scoop install` was never actually run.** Scoop is not installed on this
+machine, and installing it was not something to do unasked. The manifest parsing, both URLs
+and the hash extraction were checked directly; a real install on a clean machine is still the
+check that matters, and is the one open box in Phase 3.
+
 **Unresolved, surfaced by this pass:** `origin` is
 `https://github.com/sinh-r/EventPublisherConsumer.git`, but `Directory.Build.props` sets
 `<RepositoryUrl>https://github.com/rsrishabh007/EventScope</RepositoryUrl>` and the README's

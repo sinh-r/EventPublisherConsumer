@@ -74,24 +74,40 @@ and **AWS SQS**, without switching between three vendor consoles.
 
 ## Install
 
-Download `EventScope.exe` from the [latest release](../../releases/latest). It is a single
+### Via Scoop (recommended)
+
+```powershell
+scoop bucket add EventScope https://github.com/sinh-r/scoop-EventScope
+scoop install EventScope
+```
+
+Scoop downloads through its own client rather than a browser, so the file never gets
+Mark-of-the-Web attached and the SmartScreen prompt below never appears. Scoop also verifies
+the release's SHA256 on every install, which is a real integrity check rather than a dismissed
+dialog.
+
+### Direct download
+
+Grab `EventScope.exe` from the [latest release](../../releases/latest). It is a single
 self-contained file — no installer, and no .NET runtime needed on the machine you run it on.
 
-Windows will flag it as an unknown publisher until code signing lands (see below), so unblock
-it once after downloading:
+Windows will warn that it "isn't commonly downloaded" (see below for why), so unblock it once
+after downloading:
 
-```
+```powershell
 Unblock-File .\EventScope.exe
 ```
 
 Every release publishes `EventScope.exe.sha256` next to the binary. To check the download
 before running it:
 
-```
+```powershell
 (Get-FileHash .\EventScope.exe -Algorithm SHA256).Hash -eq (Get-Content .\EventScope.exe.sha256).Trim()
 ```
 
-A Scoop bucket is still planned — see [`Docs/DISTRIBUTION_PLAN.md`](Docs/DISTRIBUTION_PLAN.md).
+EventScope keeps everything it writes in `%LOCALAPPDATA%\EventScope` — settings, saved
+connections and captured sessions. Nothing is written next to the executable, so updating in
+place never loses them; uninstalling never removes them either.
 
 ## Build from source
 
@@ -130,18 +146,36 @@ set (`EVENTSCOPE_KAFKA_BOOTSTRAP` and friends), so the suite runs with no broker
 
 ## Why does Windows warn about this?
 
-> **Windows SmartScreen warning**
->
-> Releases are not yet code-signed, so Windows may show an "Unknown publisher" warning. To
-> run anyway, click **More info** → **Run anyway**, or right-click the file →
-> **Properties** → **Unblock**. From PowerShell: `Unblock-File .\EventScope.exe`
->
-> Every release is built by GitHub Actions from this repository and published with a SHA256
-> hash and a build provenance attestation, both verifiable against the release page.
-> Installing via Scoop avoids the warning entirely.
+Downloading `EventScope.exe` in a browser gets you *"EventScope.exe isn't commonly
+downloaded. Make sure you trust EventScope.exe before you open it."*
 
-Code signing through the [SignPath Foundation](https://signpath.org/) open-source program is
-planned once a first release ships. See [`Docs/DISTRIBUTION_PLAN.md`](Docs/DISTRIBUTION_PLAN.md).
+**That is a reputation verdict, not a malware verdict.** SmartScreen has two ways to vouch
+for a file — the publisher's code signature, or how many people have downloaded that exact
+file — and a new release of an unsigned binary has neither. Nothing was detected; SmartScreen
+simply has no basis to reassure you, and says so. To proceed anyway: **More info** → **Run
+anyway**, or right-click the file → **Properties** → **Unblock**, or `Unblock-File
+.\EventScope.exe`.
+
+Two things that are worth more than clicking through that dialog:
+
+- **Install via Scoop** (see [Install](#install)) — no Mark-of-the-Web, so no prompt at all.
+- **Verify the build provenance.** Every release is built by GitHub Actions from this
+  repository and carries an attestation proving which workflow, commit and tag produced it —
+  a stronger guarantee than an unverified signature:
+
+  ```powershell
+  gh attestation verify .\EventScope.exe --repo sinh-r/EventPublisherConsumer
+  ```
+
+Reporting the file via `feedback.smartscreen.microsoft.com` is not worth your time: that
+process works per file hash, and every release is a new hash, so any reputation earned resets
+at the next version.
+
+The real fix is code signing, through the [SignPath Foundation](https://signpath.org/)
+open-source programme — free OV-level certificates for open-source projects, verified against
+the public repository. It is planned but not yet applied for; see
+[`Docs/DISTRIBUTION_PLAN.md`](Docs/DISTRIBUTION_PLAN.md). Note that even once signed, trust
+accrues to the certificate over time rather than arriving instantly.
 
 ## Documentation
 
