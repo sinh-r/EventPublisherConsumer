@@ -1445,7 +1445,7 @@ toast, light theme, full keyboard map, and concurrent multi-connection pipelines
 
 ---
 
-## Distribution pass — repo made shareable (this pass)
+## Distribution pass — repo made shareable
 
 You asked for the distribution step so the repo can be shared publicly; you are creating the
 GitHub repository yourself. This executes `Docs/DISTRIBUTION_PLAN.md`'s Phase 1 (repo
@@ -1508,7 +1508,7 @@ surface ordinary CI teething issues the way any first run does.
 
 ---
 
-## Release pass — v0.2.1, the first tag that can actually produce a binary (this pass)
+## Release pass — v0.2.1, the first tag that can actually produce a binary
 
 You asked why the CI work done so far has never produced a downloadable executable. It is
 three separate things stacked, none of them a bug in the workflows:
@@ -1879,6 +1879,40 @@ never wired. Untouched here: it is pre-existing, unrelated to replay, and the ho
 the highest segment id already on disk, and reconcile that with the roll logic) is its own change
 with its own risk. Recorded in Pending. The test now flushes by appending a >1 MB payload and keeps
 the store open, which is a better test anyway — it reads through the live writer's own directory.
+
+---
+
+## Release pass — v0.3.0, the first release with a user-facing feature since v0.1.0 (this pass)
+
+`v0.2.0` and `v0.2.1` were both plumbing — a workflow that could not reach `Publish`, then a tag
+whose code could. `v0.3.0` is the first tag since `v0.1.0` that changes what the tool *does*: it
+ships Stages 5b and 5c, so a user can start a connection somewhere other than "now" and can reopen
+the app to browse what it already captured.
+
+- **Version bumped 0.2.1 → 0.3.0** in both places every previous bump touched:
+  `Directory.Build.props` (the one place its own comment says to bump per release tag) and
+  `app.manifest`'s `assemblyIdentity version="0.3.0.0"`, which is easy to miss because nothing fails
+  if it drifts. **Minor, not patch:** `v0.2.1` → `v0.3.0` adds history browsing, Kafka start
+  positions and openable search results. Still `0.x`, so this is not a stability promise.
+- **No behaviour change for anyone who does not opt in.** `KafkaStartFrom.Latest` is the default and
+  resolves to `Offset.Unset`, leaving `auto.offset.reset` in charge, so an existing
+  `connections.json` — which has no `StartFrom` field at all and deserializes to `null` — tails from
+  now exactly as it did before.
+- **Release notes are `generate_release_notes: true`**, so the release page is built from the commit
+  log rather than hand-written. That makes the feature commit's message the release notes, which is
+  why it is written as prose rather than a bullet list.
+
+### What this release does not include
+
+- **No real-broker verification.** The Subscribe-path seek is driven directly in tests; that
+  librdkafka honours the returned offsets across a live rebalance is still unproven here (Blocked
+  item 5). Anyone pointing `Earliest` at a large production topic is the first to find out.
+- **The same-day segment-0 truncation bug ships with it** — see Pending. It predates this release
+  and is not made worse by it, but browsing past captures is now a feature users can reach, which
+  raises how much it matters.
+- **The Scoop manifest is not updated by this tag.** `D:\My Work\scoop-EventScope` is still a local,
+  unpushed repo; its `autoupdate` block will pick up the new version and hash once that repo exists
+  on GitHub. Until then Scoop users stay on whatever the bucket pins.
 
 ---
 
