@@ -1902,6 +1902,30 @@ the app to browse what it already captured.
   log rather than hand-written. That makes the feature commit's message the release notes, which is
   why it is written as prose rather than a bullet list.
 
+### Outcome — the `release` run for `v0.3.0` succeeded and the binary is verified
+
+Run [33793316443](https://github.com/sinh-r/EventPublisherConsumer/actions/runs/33793316443),
+conclusion `success`, all steps including `Publish`, `Attest build provenance` and
+`Create release`. Verified after the fact by downloading the published assets rather than by
+trusting the run's own logs:
+
+- **`EventScope.exe`, 122.89 MB**, and **`EventScope.exe.sha256`** attached to
+  <https://github.com/sinh-r/EventPublisherConsumer/releases/tag/v0.3.0>, not a draft, and
+  `releases/latest` now reports `v0.3.0` — which is what the Scoop manifest's `checkver` reads.
+- **Published hash matches the asset.** Downloaded both; recomputed SHA256 is
+  `976668B7…D40CC0FB`, identical to the published `.sha256`.
+- **The binary is stamped from the tagged commit.** `FileVersion 0.3.0.0` and
+  `ProductVersion 0.3.0+94740f1612e9d558d6a68d6c2cc79c13f495bbe9` — the version bump reached the
+  artifact, and `app.manifest` did not drift.
+- **Provenance attestation resolves for that digest**, subject `EventScope.exe`, buildType
+  `https://actions.github.io/buildtypes/workflow/v1`, repository
+  `sinh-r/EventPublisherConsumer`, ref `refs/tags/v0.3.0`. This is the claim a security-conscious
+  user can check with `gh attestation verify` while the binary is still unsigned.
+
+Still unsigned, so the SmartScreen prompt is unchanged from `v0.2.1` — and reputation is per-hash,
+so nothing `v0.2.1` earned carries over. **The exe itself was downloaded and inspected, not run:**
+that it launches on a clean machine is untested, as it was for `v0.2.1`.
+
 ### What this release does not include
 
 - **No real-broker verification.** The Subscribe-path seek is driven directly in tests; that
