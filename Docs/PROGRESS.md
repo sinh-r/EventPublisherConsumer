@@ -1562,6 +1562,39 @@ provenance story clean, and a second binary-producing path would undercut it.
   403 recorded in item 2 above. So the dispatcher fix holds on the one runner where this bug
   ever reproduced reliably, not just locally.
 
+**Outcome — `release` run for `v0.2.1` succeeded, and the binary is verified.** Recorded
+after the tag, so it could not be in the tagged commit itself. Run
+[33690495889](https://github.com/sinh-r/EventPublisherConsumer/actions/runs/33690495889)
+completed `conclusion: success` — the first `release` run ever to get past Test and into
+Publish. Verified against the published release rather than a local build, since that is the
+artifact users actually get:
+
+- **Assets published:** `EventScope.exe` (128,796,774 bytes — byte-identical in size to the
+  local publish measured during the distribution pass, so the single-file bundle's contents
+  did not drift) and `EventScope.exe.sha256` (66 bytes).
+- **SHA256 verified by download**, not assumed: downloaded both assets and recomputed —
+  `21C326C5…9461AD`, matching the published hash exactly.
+- **Provenance attestation verified.** Decoded the Sigstore bundle's in-toto payload from
+  `GET /repos/{owner}/{repo}/attestations/sha256:…`: subject `EventScope.exe` with the
+  matching digest, `buildType` `actions.github.io/buildtypes/workflow/v1`, `ref`
+  `refs/tags/v0.2.1`, repository `sinh-r/EventPublisherConsumer`. This is the claim the
+  README makes, so it was checked once rather than assumed.
+- **Version stamping confirmed end to end.** The downloaded binary reports
+  `FileVersion 0.2.1.0` and `ProductVersion 0.2.1+e2392af…` — the tagged commit's own SHA.
+  This is exactly what tagging `b02d661` directly would have broken.
+- **The published binary runs.** `Unblock-File`d and launched the downloaded exe (not a local
+  build): main window up in seconds, then driven via the UI Automation recipe recorded in
+  item 2 above — closed the connection dialog, invoked **Start**, and read the counters back
+  from the accessibility tree at **59,500 messages, 11,206 msg/s, 0 ui-dropped**. That
+  exercises Avalonia rendering, the segment writer and the native SQLite (`e_sqlite3`)
+  extraction — the pieces whose absence from a single-file bundle fails at *runtime*, not at
+  build time, which is what `IncludeNativeLibrariesForSelfExtract=true` is there to prevent.
+  Stopped and closed cleanly. `librdkafka` remains exercised only by a real Kafka connection.
+
+Not verified: startup on a machine with no .NET runtime installed. This one has the SDK, so
+the self-contained claim is inferred from the publish flags rather than demonstrated. Worth a
+single check on a clean machine if one is ever to hand.
+
 **Unresolved, surfaced by this pass:** `origin` is
 `https://github.com/sinh-r/EventPublisherConsumer.git`, but `Directory.Build.props` sets
 `<RepositoryUrl>https://github.com/rsrishabh007/EventScope</RepositoryUrl>` and the README's
@@ -1870,6 +1903,13 @@ Nothing blocks starting M1. Ordered by how soon it matters.
    authoritative check remains GitHub's `windows-latest` runner via `ci` and `release` on the
    next push — this is the
    second time local-clean has been misleading for this exact class of bug.
+
+   **That authoritative check has now happened, and the fix holds.** Both workflows have run
+   green on `windows-latest` against the fixed code: `ci` for `b02d661` (run 33531527150) and
+   `release` for the `v0.2.1` tag (run 33690495889), the latter getting past Test and all the
+   way through Publish/Attest for the first time. Every prior run of either workflow was
+   cancelled on this hang. Treat this item as closed unless it recurs; the per-assembly
+   300 s timeout in `Run-Tests.ps1` is what will name it fast if it ever does.
 
    **A working recipe for driving the real GUI app, established this pass:** Windows UI
    Automation from PowerShell (`Add-Type -AssemblyName UIAutomationClient`) can find
