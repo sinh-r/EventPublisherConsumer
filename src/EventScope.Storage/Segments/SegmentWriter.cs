@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Globalization;
 using K4os.Compression.LZ4;
 using Microsoft.Win32.SafeHandles;
 
@@ -26,15 +27,68 @@ public sealed class SegmentWriter : IDisposable
     private int _segmentId;
     private bool _disposed;
 
-    public SegmentWriter(string directory, int startingSegmentId = 0)
+    /// <param name="startingSegmentId">The segment id to begin at. <see langword="null"/> — the
+    /// default — resumes past whatever is already in <paramref name="directory"/>; see
+    /// <see cref="NextUnusedSegmentId"/> for why that is not the same as starting at 0.</param>
+    public SegmentWriter(string directory, int? startingSegmentId = null)
     {
         _directory = directory;
         Directory.CreateDirectory(directory);
-        _segmentId = startingSegmentId;
+        _segmentId = startingSegmentId ?? NextUnusedSegmentId(directory);
         OpenNewSegment();
     }
 
     public int CurrentSegmentId => _segmentId;
+
+    /// <summary>
+    /// One past the highest segment id present in <paramref name="directory"/>, or 0 for a
+    /// directory with none.
+    ///
+    /// <para>
+    /// <b>Why the writer cannot simply start at 0.</b> <see cref="OpenNewSegment"/> opens with
+    /// <c>FileMode.Create</c>, which truncates. A day directory is reopened whenever the app is
+    /// restarted without the UTC day changing, and starting at 0 there destroyed that day's
+    /// earlier capture: the segment bytes were gone while the day file's rows still pointed at
+    /// them, so an entire session's messages became unreadable — and, once the new run wrote at
+    /// the same coordinates, those rows read back <i>another message's</i> bytes rather than
+    /// failing.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why one past the highest, and not the first free id.</b> Retention deletes individual
+    /// segment files while their rows stay in the day file flagged
+    /// <c>PayloadEvicted</c> (<c>RetentionService.EvictOldestSegment</c>). Filling the gap a
+    /// deleted segment left would hand its id to unrelated new bytes and make those evicted rows
+    /// resolve against them. Ids are therefore only ever handed out going up, and a gap stays a
+    /// gap — the reader looks segments up by id and neither needs nor assumes they are contiguous.
+    /// </para>
+    ///
+    /// <para>
+    /// The cost is one partially-filled segment per restart, which is bounded by how often a user
+    /// restarts and is the cheap side of this trade.
+    /// </para>
+    /// </summary>
+    internal static int NextUnusedSegmentId(string directory)
+    {
+        var highest = -1;
+
+        foreach (var path in Directory.EnumerateFiles(directory, "*.seg"))
+        {
+            // Anything that is not a plain segment number is not ours to reason about, so it does
+            // not get a say in where writing resumes.
+            if (int.TryParse(
+                    Path.GetFileNameWithoutExtension(path.AsSpan()),
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var id)
+                && id > highest)
+            {
+                highest = id;
+            }
+        }
+
+        return highest + 1;
+    }
 
     /// <summary>Appends one payload. Returns its coordinates for the SQLite row: the
     /// segment it landed in (may differ from <see cref="CurrentSegmentId"/> after this call

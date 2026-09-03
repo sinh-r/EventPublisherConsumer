@@ -1805,7 +1805,7 @@ tolerance the test already had is unchanged. Green across three consecutive runs
 
 ---
 
-## Stage 5c — the replayed backlog is readable in the live grid (this pass)
+## Stage 5c — the replayed backlog is readable in the live grid
 
 Stage 5b gave Kafka a start position, so a run can begin at `Earliest`, a timestamp or an explicit
 offset and then carry straight on into the live tail — past events *and* upcoming ones through one
@@ -1882,7 +1882,7 @@ the store open, which is a better test anyway — it reads through the live writ
 
 ---
 
-## Release pass — v0.3.0, the first release with a user-facing feature since v0.1.0 (this pass)
+## Release pass — v0.3.0, the first release with a user-facing feature since v0.1.0
 
 `v0.2.0` and `v0.2.1` were both plumbing — a workflow that could not reach `Publish`, then a tag
 whose code could. `v0.3.0` is the first tag since `v0.1.0` that changes what the tool *does*: it
@@ -1940,14 +1940,83 @@ that it launches on a clean machine is untested, as it was for `v0.2.1`.
 
 ---
 
+## Stage 5d — reopening a day no longer destroys it (this pass)
+
+Closes the Pending item Stage 5c opened, which was the highest-value thing on the list: **reopening
+a session root on the same UTC day silently destroyed that day's earlier capture.**
+
+`SegmentWriter`'s constructor always started at segment 0, and `OpenNewSegment` opens with
+`FileMode.Create`, which truncates. The day file's rows survive and keep pointing at
+`(segment 0, offset N)`, so an entire earlier session became rows whose bodies could not be read —
+and once the new run wrote past offset N, those rows read back **another message's bytes** rather
+than failing. Same failure mode as the Stage 5c day bug, from the opposite direction: there the row
+named the wrong directory, here the directory's contents were replaced underneath a correct row.
+
+### It was far more reachable than "restart the app"
+
+The trigger is *any* `new SessionStore` over a root that already has today's directory. Restarting
+is one way. The other, found while checking this fix, is ordinary use:
+`MainWindowViewModel.HandleTabSwitchAsync` disposes the store and nulls it on a profile change, and
+`Start` then recreates it. **Switching connection tab A → B → A on the same day destroyed A's
+earlier capture**, no restart involved. That is a normal thing to do in a tool with a connection
+manager, which makes this a data-loss bug on the happy path rather than an edge case.
+
+### The fix, and the two decisions inside it
+
+`SegmentWriter(directory, int? startingSegmentId = null)` — `null`, the new default, resumes at
+`NextUnusedSegmentId(directory)`: one past the highest `*.seg` already there, 0 for a fresh
+directory. Every existing call site passes nothing and keeps compiling; a fresh directory behaves
+exactly as before.
+
+- **Resume past the highest, not fill the first gap.** Retention deletes individual segment files
+  while their rows stay in the day file flagged `PayloadEvicted`
+  (`RetentionService.EvictOldestSegment`). Reusing a deleted segment's id would hand it to unrelated
+  new bytes and make those evicted rows resolve against them — reintroducing the exact
+  wrong-body failure this fix exists to remove. Ids only ever go up; a gap stays a gap, which the
+  reader is fine with since it looks segments up by id and never assumes contiguity.
+- **Start a new segment rather than append to the last one.** Appending would mean truncating the
+  footer off a sealed segment and restoring `_blocks`, `_uncompressedCursor` and `_filePosition`
+  from it — a lot of new failure surface on the write path to reclaim part of one 64 MB file. The
+  cost of not doing it is one partially-filled segment per reopen, which is the cheap side.
+
+### Tests — 311 total, up from 304
+
+`SegmentWriterResumeTests` (7). **Six of them failed against the old code before the fix went in**,
+which is how the bug's shape was confirmed rather than assumed — including
+`Reopening_a_directory_does_not_destroy_what_an_earlier_writer_left_there`, which failed by
+returning the *second* writer's bytes for the first writer's row. Also covered: the resumed id,
+three sequential runs over one directory all reading back, an explicit `startingSegmentId` still
+winning, a retention-deleted id never being handed out again, the `SessionStore`-level reopen, and
+retention running after a reopen leaving the surviving segment readable while the evicted one reads
+empty rather than as something else.
+
+**Not fixed here: data already lost is lost.** A day directory whose segment 0 was truncated by an
+earlier build has rows pointing into bytes that no longer exist. Those rows read empty, which is the
+correct behaviour available — nothing can recover them.
+
+---
+
+## Release pass — v0.3.1, a data-loss fix (this pass)
+
+Cut immediately after `v0.3.0` because what it fixes destroys user data on the happy path, and
+`v0.3.0` is the release that made it matter more: browsing past captures is now a feature people can
+reach, so a truncated day is something they will actually notice.
+
+- **Version bumped 0.3.0 → 0.3.1** in `Directory.Build.props` and `app.manifest`. Patch, not minor:
+  one storage fix, no new capability, no API or settings change.
+- **Nothing to migrate, and nothing a user must do.** The fix changes only where a newly opened
+  writer starts. Existing day directories are read exactly as before.
+- **What it cannot do is undo the damage.** A day whose segment 0 was truncated by `v0.3.0` or
+  earlier has rows pointing at bytes that are gone; they read as unavailable, which is the honest
+  answer and the only one available.
+
+Everyone on `v0.3.0` should move to `v0.3.1` — anyone who switches connection tabs, or reopens the
+app twice in a day, is hitting this.
+
+---
+
 ## Pending — in build-plan order
 
-- **Reopening a day truncates its segment 0 — data loss on same-day restart.** Found in Stage 5c
-  (see above). `SessionStore.OpenCurrentDay` always starts a `SegmentWriter` at segment 0 with
-  `FileMode.Create`. Fix: scan the day directory for existing segment files and resume past the
-  highest, then check that against `RollIfNeeded`'s assumptions and retention's deletes. Highest
-  value of anything in this list — it silently destroys already-captured payloads, and browsing past
-  captures is now a feature users can reach.
 - **Harden `RetentionService` against an open browse.** A `try/catch (IOException)` that defers to
   the next tick rather than faulting the loop, for the case where a browse still holds a segment
   handle on a day retention wants to delete.
