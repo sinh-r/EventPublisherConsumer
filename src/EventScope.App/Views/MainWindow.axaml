@@ -266,11 +266,13 @@
             </Grid>
         </Border>
 
-        <!-- Search bar. Two tiers wired here (build plan §5 M2): the instant ring filter
-             (every keystroke, no delay - highlights matching rows already on screen) and
-             body FTS (debounced, reports a match count and whether the index is current).
-             Deep scan and its overlay, and an identifier-search scope selector, are Stage 5
-             per the build plan's own milestone boundary - see SearchViewModel's remarks. -->
+        <!-- Search bar. Three tiers wired here: the instant ring filter (every keystroke, no
+             delay - highlights matching rows already on screen), body FTS (debounced, reports
+             a match count and whether the index is current), and deep scan (explicit, reads
+             every full body off disk - its overlay sits over the grid below). The full
+             Live/Today/20 days/Deep scope selector from UI spec §4.4 still needs the segmented
+             control from §9's component inventory, which is Stage 5 - see SearchViewModel's
+             remarks. -->
         <Border Grid.Row="3" Background="{DynamicResource Bg}"
                 BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="14,0">
             <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
@@ -292,6 +294,15 @@
                             Background="Transparent" BorderBrush="{DynamicResource Line}"
                             Foreground="{DynamicResource Text}" Padding="10,3"
                             FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                    <!-- The last-resort tier: reads every full body off disk, so it finds a
+                         term past the 2 KB indexed prefix, or anything at all while the index
+                         is behind. Minutes of work where FTS takes milliseconds, hence a
+                         button rather than anything that fires as you type. -->
+                    <Button Content="Deep scan" Command="{Binding Search.DeepScanCommand}"
+                            Background="Transparent" BorderBrush="{DynamicResource Line}"
+                            Foreground="{DynamicResource Text}" Padding="10,3"
+                            FontFamily="{DynamicResource SansFontFamily}" FontSize="12"
+                            ToolTip.Tip="Reads every message body on disk. Slow, but finds what the index cannot." />
                     <TextBlock IsVisible="{Binding !Search.IndexIsCurrent}"
                                FontFamily="{DynamicResource SansFontFamily}" FontSize="11"
                                Foreground="{DynamicResource Amber}"
@@ -412,6 +423,37 @@
                 </Style>
             </DataGrid.Styles>
         </DataGrid>
+
+        <!-- Deep search overlay (UI spec §7): a modal-style panel, not a full dialog, anchored
+             directly below the search bar. Shares row 4 with the DataGrid and aligns to the top
+             of it rather than taking a row of its own - a new RowDefinition here would renumber
+             every Grid.Row below it, and the spec wants this over the content anyway. Its
+             counter and bar are driven by SearchViewModel's 60 ms ticker, not by the scan's own
+             per-message reports; see RefreshDeepScanDisplay for why. -->
+        <Border Grid.Row="4" VerticalAlignment="Top" Margin="14,10" Padding="14,12"
+                Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
+                BorderThickness="1" CornerRadius="4" BoxShadow="0 4 16 0 #40000000"
+                IsVisible="{Binding Search.IsDeepScanning}">
+            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Text}"
+                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                           TextTrimming="CharacterEllipsis"
+                           Text="{Binding Search.DeepScanQuery, StringFormat='Deep scan — “{0}”'}" />
+                <Button Grid.Row="0" Grid.Column="1" Content="Cancel"
+                        Command="{Binding Search.DeepScanCancelCommand}"
+                        Background="Transparent" BorderBrush="{DynamicResource Line}"
+                        Foreground="{DynamicResource Text}" Padding="10,3" Margin="10,0,0,0"
+                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+                <ProgressBar Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Height="4"
+                             Margin="0,10" Minimum="0" Maximum="100"
+                             Value="{Binding Search.DeepScanProgressValue}" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                           Foreground="{DynamicResource Muted}"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="11.5"
+                           Text="{Binding Search.DeepScanStatusText}" />
+            </Grid>
+        </Border>
 
         <GridSplitter Grid.Row="5" Height="4" Background="{DynamicResource Line}"
                       ResizeDirection="Rows" Cursor="SizeNorthSouth"

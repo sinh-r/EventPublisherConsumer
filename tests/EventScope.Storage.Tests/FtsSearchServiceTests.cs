@@ -69,11 +69,12 @@ public sealed class FtsSearchServiceTests : IDisposable
         using var store = new SessionStore(_root, time);
 
         await WriteMessageAsync(store, "match on day one", "c-1", "orders.created", Ct);
+        var dayOne = store.CurrentDay;
         await WaitForIndexAsync(store, 1, Ct);
 
         time.Set(new DateTimeOffset(2026, 2, 2, 0, 0, 0, TimeSpan.Zero));
         store.EnsureCurrentDay();
-        await Task.Delay(200, Ct); // old day's async seal
+        await SqliteTestHelpers.WaitForRolloverSealAsync(_root, dayOne, Ct);
 
         await WriteMessageAsync(store, "match on day two", "c-2", "orders.created", Ct);
         await WaitForIndexAsync(store, 1, Ct);

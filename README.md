@@ -34,9 +34,12 @@ and **AWS SQS**, without switching between three vendor consoles.
   on a chosen partition — so the messages that arrived before you opened the tool are not lost to
   you. Still non-destructive: the throwaway group and disabled auto-commit mean reading a backlog
   never touches a real consumer group.
-- **Search that works on volume.** Full-text search over message bodies (FTS5), trigram
-  infix search on message and correlation IDs, and a streaming deep scan for anything the
-  index doesn't cover yet.
+- **Search that works on volume.** Instant filtering of what is already on screen, full-text
+  search over message bodies (FTS5), and a cancellable deep scan that reads every body on disk
+  with live progress — for the things an index structurally cannot answer: a term past the
+  indexed prefix, or anything at all while the index is still catching up. Trigram infix search
+  on message and correlation IDs is built and tested but not yet reachable from the search bar;
+  it needs the scope selector that is still on the polish list.
 - **Bounded by design.** A byte-budgeted ingest path, a configurable on-disk cap with
   eviction, and a message grid that never materializes more rows than are on screen — this
   is the actual point of the project, not an afterthought.

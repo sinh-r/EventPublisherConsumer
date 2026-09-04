@@ -1,4 +1,5 @@
 using System.Text;
+using EventScope.Core.Models;
 using EventScope.Storage.Retention;
 using EventScope.Storage.Segments;
 using EventScope.Storage.Sqlite;
@@ -68,7 +69,7 @@ public sealed class RetentionServiceTests : IDisposable
         // old one is eligible.
         time.Set(new DateTimeOffset(2026, 1, 20, 0, 0, 0, TimeSpan.Zero));
         store.EnsureCurrentDay();
-        await Task.Delay(200, Ct); // old day's async seal (see SessionStore's remarks)
+        await SqliteTestHelpers.WaitForRolloverSealAsync(_root, oldDay, Ct);
 
         using var retention = new RetentionService(
             _root, store, capBytes: long.MaxValue, retentionDays: 14, timeProvider: time,
@@ -184,7 +185,7 @@ public sealed class RetentionServiceTests : IDisposable
 
         time.Set(new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero));
         store.EnsureCurrentDay();
-        await Task.Delay(200, Ct); // old day's async seal
+        await SqliteTestHelpers.WaitForRolloverSealAsync(_root, oldDay, Ct);
 
         // Simulate every segment in the old day having already been evicted by an earlier
         // cap-enforcement pass, without needing to actually fill the store to force it.
@@ -201,5 +202,190 @@ public sealed class RetentionServiceTests : IDisposable
         retention.RunOnce();
 
         Assert.False(Directory.Exists(oldDir));
+    }
+
+    private static async Task<long> CountEvictedRowsForSegmentAsync(
+        string dbPath, int segmentId, CancellationToken ct)
+    {
+        await using var connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM messages WHERE segment_id = $segment AND flags & 4 != 0";
+        command.Parameters.AddWithValue("$segment", segmentId);
+        return (long)(await command.ExecuteScalarAsync(ct))!;
+    }
+
+    /// <summary>
+    /// The coupling that motivates the guards. A history browse, or a deep scan
+    /// (<see cref="Search.DeepScanner"/>) walking every day file on disk, holds
+    /// <see cref="SegmentReader"/> handles opened <c>FileShare.ReadWrite</c> — which on Windows
+    /// does not admit a delete. Retention has to read that as "not now" and keep going. Before
+    /// the guards the <see cref="IOException"/> escaped <see cref="RetentionService.RunOnce"/>,
+    /// faulted the background loop task, and stopped retention for the rest of the session with
+    /// no symptom other than a store growing past its cap.
+    /// </summary>
+    [Fact]
+    public async Task An_expired_day_still_open_for_reading_defers_instead_of_faulting_the_pass()
+    {
+        var time = new SettableTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var store = new SessionStore(_root, time);
+
+        var coords = store.SegmentWriter.Append("old day"u8.ToArray());
+        store.SegmentWriter.Append(new byte[SegmentFormat.BlockSize]); // force it to disk
+        await WriteOneMessageAsync(store, coords.SegmentId, coords.Offset, coords.Length, Ct);
+
+        var oldDay = store.CurrentDay;
+        var oldDir = store.Directory;
+        var lockedSegment = SegmentFormat.SegmentPath(oldDir, coords.SegmentId);
+
+        time.Set(new DateTimeOffset(2026, 1, 20, 0, 0, 0, TimeSpan.Zero));
+        store.EnsureCurrentDay();
+        await SqliteTestHelpers.WaitForRolloverSealAsync(_root, oldDay, Ct);
+
+        using var retention = new RetentionService(
+            _root, store, capBytes: long.MaxValue, retentionDays: 14, timeProvider: time,
+            interval: TimeSpan.FromHours(1));
+
+        var reader = new SegmentReader(oldDir);
+        try
+        {
+            // SegmentReader opens its handles lazily, so read something back to make it
+            // actually hold one — constructing it alone locks nothing.
+            var header = new MessageHeader(
+                sequence: 1, enqueuedTicks: 0, rowId: 1, segmentId: coords.SegmentId,
+                offset: coords.Offset, length: coords.Length, subjectId: 0,
+                correlationInternId: 0, partition: 0, flags: MessageFlags.None);
+            Assert.False((await reader.ReadAsync(header, Ct)).IsEmpty);
+
+            retention.RunOnce(); // must not throw
+
+            Assert.True(File.Exists(lockedSegment), "the segment being read must survive the blocked pass");
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+
+        // Deletion is deferred, not abandoned: the day is still expired, so the next pass
+        // finishes it. A pass blocked partway through can leave a day directory that has lost
+        // its database, which SessionLayout.ListDayDirectories already anticipates and still
+        // enumerates — which is exactly why retrying converges.
+        retention.RunOnce();
+        Assert.False(Directory.Exists(oldDir), "the day should be deleted once the reader releases it");
+    }
+
+    /// <summary>
+    /// Cap enforcement has to move past a candidate it cannot delete rather than retry it. Its
+    /// loop runs until total bytes drop under the cap, so a locked oldest segment that reported
+    /// success would be retried forever against a total that never falls — a hung retention
+    /// thread rather than a faulted one.
+    /// </summary>
+    [Fact]
+    public async Task Cap_enforcement_skips_a_locked_segment_and_evicts_the_next_candidate()
+    {
+        var time = new SettableTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var store = new SessionStore(_root, time);
+
+        // Same three-distinct-segment setup as the plain cap test above.
+        var random = new Random(7);
+        var coordsList = new List<(int SegmentId, int Offset, int Length)>();
+        for (var i = 0; i < 3; i++)
+        {
+            var coords = store.SegmentWriter.Append(Encoding.UTF8.GetBytes($"message {i}"));
+            coordsList.Add(coords);
+            await WriteOneMessageAsync(store, coords.SegmentId, coords.Offset, coords.Length, Ct);
+
+            var startingSegment = store.SegmentWriter.CurrentSegmentId;
+            var filler = new byte[SegmentFormat.BlockSize];
+            while (store.SegmentWriter.CurrentSegmentId == startingSegment)
+            {
+                random.NextBytes(filler);
+                store.SegmentWriter.Append(filler);
+            }
+        }
+
+        Assert.Equal(3, coordsList.Select(c => c.SegmentId).Distinct().Count());
+
+        var dbPath = Path.Combine(store.Directory, $"{store.CurrentDay}.db");
+        var oldestSegmentPath = SegmentFormat.SegmentPath(store.Directory, coordsList[0].SegmentId);
+        var secondSegmentPath = SegmentFormat.SegmentPath(store.Directory, coordsList[1].SegmentId);
+
+        // Sized against the second segment, since that is the one this pass can actually evict.
+        var totalBytes = Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
+            .Sum(f => new FileInfo(f).Length);
+        var capBytes = totalBytes - (new FileInfo(secondSegmentPath).Length * 3 / 4);
+
+        using var retention = new RetentionService(
+            _root, store, capBytes, retentionDays: 3650, timeProvider: time,
+            interval: TimeSpan.FromHours(1));
+
+        // FileShare.ReadWrite is the exact share mode SegmentReader opens with, so this holds
+        // the file the same way a live browse or deep scan does.
+        using (File.OpenHandle(oldestSegmentPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            retention.RunOnce();
+        }
+
+        Assert.True(File.Exists(oldestSegmentPath), "the locked segment must survive");
+        Assert.False(File.Exists(secondSegmentPath), "the next candidate should have been evicted instead");
+
+        await store.Writer.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5), Ct);
+
+        // The locked segment's rows must not be flagged: its bytes are still on disk and still
+        // readable, so a PayloadEvicted flag would be the row lying about itself.
+        Assert.Equal(0, await CountEvictedRowsForSegmentAsync(dbPath, coordsList[0].SegmentId, Ct));
+        Assert.Equal(1, await CountEvictedRowsForSegmentAsync(dbPath, coordsList[1].SegmentId, Ct));
+        Assert.Equal(3, await CountRowsAsync(dbPath, Ct)); // rows are marked, never deleted
+
+        await SqliteTestHelpers.AssertFtsIntegrityAsync(dbPath, Ct);
+    }
+
+    /// <summary>
+    /// The guards exist for the background loop, not for <see cref="RetentionService.RunOnce"/>,
+    /// so this drives the real timer rather than calling the pass directly.
+    /// <see cref="SettableTimeProvider"/> fakes only the clock, not <c>CreateTimer</c>, so the
+    /// interval below is real wall-clock time while the age cutoff stays on the fake clock.
+    /// </summary>
+    [Fact]
+    public async Task The_background_loop_keeps_running_after_a_pass_it_could_not_complete()
+    {
+        var time = new SettableTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var store = new SessionStore(_root, time);
+
+        var coords = store.SegmentWriter.Append("old day"u8.ToArray());
+        store.SegmentWriter.Append(new byte[SegmentFormat.BlockSize]); // force it to disk
+        await WriteOneMessageAsync(store, coords.SegmentId, coords.Offset, coords.Length, Ct);
+
+        var oldDay = store.CurrentDay;
+        var oldDir = store.Directory;
+        var lockedSegment = SegmentFormat.SegmentPath(oldDir, coords.SegmentId);
+
+        time.Set(new DateTimeOffset(2026, 1, 20, 0, 0, 0, TimeSpan.Zero));
+        store.EnsureCurrentDay();
+        await SqliteTestHelpers.WaitForRolloverSealAsync(_root, oldDay, Ct);
+
+        using var retention = new RetentionService(
+            _root, store, capBytes: long.MaxValue, retentionDays: 14, timeProvider: time,
+            interval: TimeSpan.FromMilliseconds(50));
+
+        // Several ticks all fail while the handle is held. Before the guards, the first of them
+        // faulted the loop task and no tick after it ever ran again.
+        using (File.OpenHandle(lockedSegment, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            await Task.Delay(300, Ct);
+            Assert.True(File.Exists(lockedSegment));
+        }
+
+        // Released: a later tick must still arrive, and finish the job. Polled against a
+        // generous deadline rather than a fixed sleep — the claim is that a tick happens at
+        // all, not how soon, and a fixed sleep would only make this flaky on a loaded runner.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (Directory.Exists(oldDir) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50, Ct);
+        }
+
+        Assert.False(Directory.Exists(oldDir),
+            "the loop must survive a blocked pass and delete the day on a later tick");
     }
 }

@@ -19,16 +19,30 @@ namespace EventScope.Storage.Retention;
 /// <b>Cap enforcement</b> evicts the oldest segment across the whole store — oldest day first,
 /// lowest segment id within that day — until total on-disk bytes (including <c>-wal</c> files,
 /// which would otherwise blow the cap from a direction the accounting doesn't see) drop back
-/// under the cap. Eviction means: mark the segment's rows <see cref="MessageFlags.PayloadEvicted"/>
-/// via <see cref="SessionStore.EnqueueSetFlags"/> (never touching an FTS-indexed column), then
-/// delete the segment file itself. The segment a live writer is still appending to is never a
-/// candidate — deleting it out from under an open <see cref="SegmentWriter"/> handle would
-/// corrupt the write in progress.
+/// under the cap. Eviction means: delete the segment file, then mark its rows
+/// <see cref="MessageFlags.PayloadEvicted"/> via <see cref="SessionStore.EnqueueSetFlags"/>
+/// (never touching an FTS-indexed column). The segment a live writer is still appending to is
+/// never a candidate — deleting it out from under an open <see cref="SegmentWriter"/> handle
+/// would corrupt the write in progress.
 /// </para>
 ///
 /// <para>
 /// When a day has no segments left, its <c>.db</c> is dropped too — there is nothing in it
 /// worth keeping if every payload it references is already gone.
+/// </para>
+///
+/// <para>
+/// <b>Every delete this class performs can legitimately fail, and none of them may fault the
+/// loop.</b> A reader elsewhere in the process — a history browse, or a deep scan
+/// (<see cref="Search.DeepScanner"/>) walking every day file on disk — holds
+/// <see cref="SegmentReader"/> handles opened <see cref="FileShare.ReadWrite"/>, which on
+/// Windows does not include <c>FILE_SHARE_DELETE</c>: the delete throws
+/// <see cref="IOException"/> (or <see cref="UnauthorizedAccessException"/>, which Windows
+/// raises for some of the same cases) for as long as that handle is open. Retention therefore
+/// treats a blocked candidate as "not now" and moves on — to the next candidate this pass, or
+/// to the same one on the next tick. Letting it escape would fault the loop task and stop
+/// retention for the rest of the session, silently: <see cref="Dispose"/> observes that fault
+/// and has nowhere to report it, so the only symptom would be a store growing past its cap.
 /// </para>
 /// </summary>
 public sealed class RetentionService : IDisposable
@@ -83,7 +97,20 @@ public sealed class RetentionService : IDisposable
         {
             while (await _timer.WaitForNextTickAsync(_cts.Token).ConfigureAwait(false))
             {
-                RunOnce();
+                try
+                {
+                    RunOnce();
+                }
+                catch (IOException)
+                {
+                    // A file this pass wanted gone is still open somewhere. Defer to the next
+                    // tick rather than faulting the loop — see the class remarks. The
+                    // per-candidate guards below already absorb every expected case; this is
+                    // the backstop that keeps the loop alive through anything they miss.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
             }
         }
         catch (OperationCanceledException)
@@ -115,7 +142,9 @@ public sealed class RetentionService : IDisposable
 
             if (date >= cutoff) continue;
 
-            _sessionStore.DeleteDay(day);
+            // A day held open by a browse or a deep scan stays until it is released. Every
+            // other expired day in this pass is still deleted.
+            TryDeleteDay(day);
         }
     }
 
@@ -135,7 +164,28 @@ public sealed class RetentionService : IDisposable
             if (!Directory.Exists(dir)) continue;
             if (Directory.EnumerateFiles(dir, "*.seg").Any()) continue;
 
+            TryDeleteDay(day);
+        }
+    }
+
+    /// <summary><see langword="false"/> when the day is currently held open elsewhere. The
+    /// caller's only correct response is to move on: retrying in place cannot succeed until
+    /// whoever holds the handle releases it, and waiting for that is not this loop's job.
+    /// </summary>
+    private bool TryDeleteDay(string day)
+    {
+        try
+        {
             _sessionStore.DeleteDay(day);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
@@ -160,12 +210,30 @@ public sealed class RetentionService : IDisposable
                     continue;
                 }
 
+                // Delete first, flag only once it succeeds. The other order marks rows
+                // PayloadEvicted while their bytes are still on disk and readable, so a row
+                // ends up lying about itself for as long as the delete keeps failing.
+                try
+                {
+                    File.Delete(SegmentFormat.SegmentPath(dir, segmentId));
+                }
+                catch (IOException)
+                {
+                    continue; // held open by a reader — try the next candidate, not this one again
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
                 _sessionStore.EnqueueSetFlags(day, segmentId, (byte)MessageFlags.PayloadEvicted);
-                File.Delete(SegmentFormat.SegmentPath(dir, segmentId));
                 return true;
             }
         }
 
+        // Reached only when nothing anywhere could be evicted. Returning false is what stops
+        // EnforceCap's loop: a locked oldest segment that reported success instead would be
+        // retried forever against a total that never drops.
         return false;
     }
 

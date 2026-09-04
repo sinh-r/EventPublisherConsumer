@@ -187,7 +187,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         // this run - which is the whole point of being able to look at past captures.
         Search = new SearchViewModel(
             Rows,
-            () => SelectedTab is { } tab ? new FtsSearchService(SessionRootDirectory(tab.Profile.Id)) : null);
+            () => SelectedTab is { } tab ? new FtsSearchService(SessionRootDirectory(tab.Profile.Id)) : null,
+            // Its own ticker, started only for the duration of a deep scan: the ingest
+            // coalescer's is running whenever a stream is, and a scan can outlive one.
+            new DispatcherTimerTicker());
         Settings = new SettingsViewModel(_settings, () => _sessionStore, () => _retentionService);
         Publisher = new PublisherViewModel(sinkProvider: () => _sink ??= EventSinkFactory.Create(SelectedTab?.Profile));
 

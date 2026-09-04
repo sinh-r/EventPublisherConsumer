@@ -2035,15 +2035,208 @@ machine remains untested, as for every release so far.
 
 ---
 
+## Stage 5e — retention survives an open reader, and deep scan reaches the UI (this pass)
+
+The two items at the top of §Pending, done in one pass because they are the same bug from two
+sides. Retention could not survive a day file being held open; `DeepScanner` — fully built and
+tested since M2, with zero callers — is the thing most likely to hold it open, since it walks
+*every* day file on disk. Shipping either alone would have left the obvious hole.
+
+### 1. A day file held open stopped retention for the rest of the session
+
+`RunLoopAsync` caught only `OperationCanceledException`. `SessionStore.DeleteDay` ends in
+`Directory.Delete(dir, recursive: true)`, and `SegmentReader` opens segment handles
+`FileShare.ReadWrite` — no `FILE_SHARE_DELETE` — so any open reader makes that throw
+`IOException`. It escaped `RunOnce`, faulted `_loopTask`, and **retention never ran again**.
+`Dispose` observes that fault and has nowhere to report it, so the only symptom was a store
+quietly growing past its cap.
+
+Four changes, all inside `RetentionService`:
+
+- **The loop is guarded**, so a blocked pass defers to the next 30 s tick.
+- **Each candidate is guarded**, so one locked day doesn't abort the rest of the pass —
+  `TryDeleteDay` for both delete sites, a `continue` for the segment delete.
+- **`EnforceCap`'s loop can no longer spin.** It runs until total bytes drop under the cap, so a
+  locked oldest segment that swallowed its failure and still reported success would be retried
+  forever against a total that never falls — a *hung* retention thread instead of a faulted one.
+  `EvictOldestSegment` now moves to the next candidate and returns `false` only when nothing
+  anywhere could be evicted.
+- **Eviction ordering is reversed.** It used to `EnqueueSetFlags(PayloadEvicted)` and *then*
+  `File.Delete`. When the delete fails, that leaves rows flagged as evicted while their bytes are
+  still on disk and readable — the row lying about itself. Delete first, flag only on success.
+
+**A blocked age-deletion can still partially delete a day**, because `Directory.Delete` removes
+what it can before it throws. That is not a regression (the same partial delete happened before,
+and killed retention on the way out), it converges — the day is still expired, so the next pass
+finishes it — and `SessionLayout.ListDayDirectories` already enumerates day *directories* rather
+than day *files*, explicitly anticipating a directory that has outlived its database. So nothing
+is orphaned.
+
+### 2. `DeepScanner` now has a caller, an overlay, and one row shape
+
+- **It yields `SearchHit`, not `DeepScanMatch`.** `ScanDayAsync` already selected
+  `id, segment_id, offset, length`; widening that to `MessageRowQuery.Columns` + `SubjectJoin`
+  and reading through `MessageRowQuery.ReadHit` was most of the work, and it is what made the UI
+  side cheap: `HistoryViewModel.ShowResults` already takes `IReadOnlyList<SearchHit>`, so
+  deep-scan results open through the exact path FTS results use — no second hydration, and no way
+  for the two tiers to describe the same message differently, which is what `MessageRowQuery`
+  exists to prevent. `SearchHit.IndexHwmNotApplicable` was already there for precisely this: a
+  deep scan never consults the index, so "are these current" is not a question it can answer, nor
+  needs to.
+- **`ScanAsync(root, …)` scans the whole store**, newest day first with an early exit at
+  `maxResults`, mirroring `FtsSearchService.SearchAsync`'s traversal so "the first N matches"
+  means the same thing in both tiers.
+- **Progress is measured in payload bytes, not rows.** UI spec §7 asks for
+  "Scanned 412 MB of 1.84 GB · 87 matches · 3.2s elapsed"; a row count has no denominator. The
+  total is one `SUM(length)` per day, summed across every day *before* the first payload is read,
+  so the bar never rebases mid-scan. Bytes, not segment-file sizes: those are LZ4-compressed and
+  carry block tables and footers, so they would under-report against what is actually being
+  decompressed.
+- **`SearchViewModel` gained the third tier.** `DeepScanCommand` /`DeepScanCancelCommand` (the
+  toolkit's `IncludeCancelCommand`), the overlay's bound state, and results published through the
+  existing `ResultsRequested` event — already wired to `History.ShowResults`, so
+  `MainWindowViewModel` needed nothing but the ticker. A **cancelled scan still publishes what it
+  found**, labelled "partial": cancelling means "that's enough", not "throw that away".
+- **Progress is pulled by the 60 ms UI ticker, not pushed per message.** A scan reports once per
+  row; a `Progress<T>` created on the UI thread would post every one of those to the dispatcher —
+  millions of posts to move a bar a pixel at a time. The scan writes three plain `long`s instead
+  and `IUiTicker` (the same abstraction the ingest coalescer uses, its own instance started only
+  for the scan's duration) reads them. The three are deliberately not synchronized: a reader can
+  see one row's byte count beside the next row's match count, which on a progress display is
+  invisible and self-correcting.
+- **The overlay shares row 4 with the `DataGrid`**, top-aligned, rather than taking a
+  `RowDefinition` of its own — a new row would renumber every `Grid.Row` below it, and UI spec §7
+  wants a panel over the content anyway.
+
+**Not done, deliberately:** the full `Live / Today / 20 days / Deep` scope selector (UI spec
+§4.4). It needs the segmented control from §9's component inventory, which does not exist yet and
+is Stage 5 polish. A single `Deep scan` button reaches the tier now.
+
+### A latent test flake, found by this pass and fixed properly
+
+The first full-suite run came back with **three `RetentionServiceTests` failures — two of them
+pre-existing tests** — that had passed 79/79 when the assembly ran alone, twice.
+
+Not a regression, and worth recording because the diagnosis was not the obvious one.
+`SessionStore.EnsureCurrentDay` seals a rolled-over day on a fire-and-forget `Task.Run` that
+exposes no handle to await, and six tests across three files all bet a fixed
+`await Task.Delay(200)` on it finishing. That bet holds in isolation and loses under full-suite
+load, where the thread pool is saturated and the seal task queues behind everything else. The
+tell was which assertion failed in `A_non_current_day_with_no_segments_left_has_its_db_dropped_too`:
+its own `File.Delete` of the `.seg` files *succeeded* and only the directory delete failed —
+exactly the state where the seal had finished `oldSegmentWriter.Dispose()` but not yet
+`oldWriter.Dispose()`, so the `.db` was still held.
+
+The retention guards did not cause this; they changed how it presents. Before them the same race
+surfaced as an unhandled `IOException`, after them as "the directory is still there". Fixed at the
+cause rather than by lengthening the sleep: `SqliteTestHelpers.WaitForRolloverSealAsync` polls
+until the day's `.db` can be opened `FileShare.None`, which is the observable end of the seal. All
+six sites now use it, including the two in `FtsSearchServiceTests` and `DeepScannerTests` that
+carry the same latent flake for the same reason.
+
+**Left alone: the production side.** An unobservable fire-and-forget seal is a real design smell,
+but `EnsureCurrentDay` returning something awaitable is a change to the ingest hot path and does
+not belong in a pass about retention and search.
+
+### Tests — 324 total, up from 311
+
+Repro-first for the retention half, the discipline Stage 5d used and the dispatcher hunt learned
+the hard way: **all three new `RetentionServiceTests` were confirmed failing against the pre-fix
+code before the fix went in**, each for its predicted reason — `IOException` out of
+`DeleteExpiredDays`, `IOException` out of `EvictOldestSegment`, and the loop test timing out
+because the faulted loop never ticked again. They cover a day held open by a real `SegmentReader`
+mid-read (deferred, then deleted once released), a locked oldest segment (the next candidate
+evicted instead, and the locked segment's rows *not* flagged), and the background loop surviving
+blocked passes and finishing on a later tick.
+
+`DeepScannerTests` covers the new row shape (subject, identifiers, preview, flags and
+`IndexHwmNotApplicable` all hydrated), byte-denominated progress against a fixed total, match
+counting, and newest-day-first traversal with the `maxResults` early exit. `SearchViewModelTests`
+(new, 6) drives the tier end to end: a needle past the 2 KB prefix found and published, results
+re-sorted oldest-first, the overlay closing on a full bar with real final numbers, cancel never
+leaving it open, and the disabled/not-connected states.
+
+`SearchViewModelTests` needs **no `HeadlessFixture`** — `MessageRowsView` is not an Avalonia UI
+object and the view model touches only plain properties — which keeps it clear of the headless
+dispatcher hazards in Blocked item 2 outright rather than relying on that fixture's workarounds.
+
+Full suite green in Release across two consecutive runs: Acceptance 3 (3 soak-gated skips),
+App 142 (1 skip), Kafka 46 (2 broker-gated skips), Core 54, Storage 79.
+
+### Driven in the real app, against 1.98 GB of real capture
+
+Not just unit-tested. Every binding here is compiled (`x:DataType` on the window plus
+`AvaloniaUseCompiledBindingsByDefault`), so a typo would have been a build error — but that says
+nothing about whether the thing works. Driven instead through Windows UI Automation from
+PowerShell, the recipe Blocked item 2 records, against the **Fake source tab, whose session root
+is the base directory** — which on this machine holds two real captures, `2026-09-01` (1.3 GB) and
+`2026-09-03` (213 MB).
+
+- **`Deep scan` is disabled on an empty query and enables on the first keystroke** —
+  `NotifyCanExecuteChangedFor` confirmed live, not just in a test.
+- **The overlay's counter is real.** Polled once a second during a scan of the whole root:
+  `Scanned 135.7 MB of 1.98 GB · 0 matches · 6.2s elapsed` → `279.7 MB` → `470.6 MB` → … →
+  `1.77 GB`, with the denominator fixed at 1.98 GB throughout, exactly as designed. **≈200 MB/s**,
+  and the UI stayed responsive to automation calls the whole time — the 60 ms ticker doing its
+  job.
+- **Measured, and worth knowing: the denominator costs about 5 seconds on a 2 GB store.** The
+  first counter reading already said "6.2s elapsed" one second after the click, because
+  `SUM(length)` across both day files runs before the first payload is read. The overlay shows
+  "Measuring…" for that window rather than a bar frozen at zero with no explanation. Honest, but
+  it is a real pause and it scales with the store.
+- **Completion opens the results**: the browse banner read
+  `Browsing deep scan for “order” — live capture continues in the background.`
+- **The `maxResults` early exit works**: a scan for `id` hit the cap almost instantly and reported
+  `5000+ deep matches` — it stopped after the first 5000 rows rather than reading 1.98 GB.
+- **Cancel works and is honest about it**: cancelled 3.3 s into a scan
+  (`Scanned 500.4 MB of 1.98 GB`), the overlay closed and the banner read
+  `Browsing partial deep scan for “zzz-no-such-token” …`.
+
+**Not done manually: the retention-defers-under-an-open-scan check.** Staging it in the live app
+would mean setting retention short enough to expire `2026-09-01` and letting it delete 1.3 GB of
+real capture — destroying user data to demonstrate a fix. The mechanism is covered instead by
+`An_expired_day_still_open_for_reading_defers_instead_of_faulting_the_pass`, which holds a real
+`SegmentReader` mid-read over the day retention wants (the same handle a deep scan takes) and was
+confirmed failing against the pre-fix code first.
+
+---
+
+## Release pass — v0.4.0, deep search reaches the UI
+
+Minor, not patch: this pass **changes what the tool can do**, which is the same bar `v0.3.0` was
+cut at. `v0.3.1` was patch because it was a fix and nothing else. Here a whole search tier that
+existed only as library code becomes something a user can actually reach, alongside a real
+reliability fix underneath it.
+
+- **Version bumped 0.3.1 → 0.4.0** in `Directory.Build.props` and `app.manifest`.
+- **Nothing to migrate, and nothing a user must do.** No settings, schema, or on-disk format
+  changed. Day files written by `v0.3.1` are read identically.
+- **README corrected while here.** Its search bullet claimed trigram infix search on message and
+  correlation IDs as a feature. That has been true of the *library* since M2 and false of the
+  *product* the whole time — `SearchViewModel` has no scope selector to reach it, as its own
+  remarks have said all along. The bullet now claims the deep scan (newly true) and says plainly
+  that identifier search is built but not yet reachable.
+
+Worth taking for the retention fix alone: on `v0.3.1` and earlier, anything holding a day file
+open — a history browse, and now a deep scan — permanently stopped retention for the rest of the
+session, with no symptom except a store growing past its configured cap.
+
+Still unsigned. SmartScreen reputation is per-hash, so `v0.4.0` starts from zero exactly as every
+release before it has.
+
+---
+
 ## Pending — in build-plan order
 
-- **Harden `RetentionService` against an open browse.** A `try/catch (IOException)` that defers to
-  the next tick rather than faulting the loop, for the case where a browse still holds a segment
-  handle on a day retention wants to delete.
-- **Wire `DeepScanner`.** Fully implemented and tested, still zero callers from `EventScope.App`.
-  Now that a day file is browsable it has somewhere to put its results, and UI spec §10 already
-  specifies the "Deep search running" overlay state.
-
+- **Both of this list's former top items are done** — see Stage 5e above. `RetentionService` now
+  defers a blocked delete instead of faulting its loop, and `DeepScanner` is wired to the UI
+  behind the spec §7 overlay.
+- **`EnsureCurrentDay`'s rollover seal is unobservable.** It runs on a fire-and-forget `Task.Run`
+  with no handle to await, which is what let six tests bet on a fixed sleep and fail under load
+  (Stage 5e above). Those tests now wait on the observable end instead, so nothing is broken — but
+  a seal nothing can await is still the wrong shape, and the *next* caller that needs to know when
+  a day is finished will hit it too. Fixing it properly means touching the ingest hot path, which
+  is why it is listed rather than done.
 - **Heap growth, remaining ~55–75 MB — optional further work.** Down from ~470–500 MB (see
   above) but still over the 50 MB budget. Not pursued further this pass since the return was
   already large; a longer (5–10 minute) `dotnet-counters` run would distinguish "GC hasn't

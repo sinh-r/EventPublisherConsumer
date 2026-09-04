@@ -19,6 +19,44 @@ internal static class SqliteTestHelpers
         throw new TimeoutException($"Expected {expected} rows within {timeout}, saw {last}.");
     }
 
+    /// <summary>
+    /// Waits out the rollover seal <see cref="Sqlite.SessionStore.EnsureCurrentDay"/> runs on a
+    /// fire-and-forget <c>Task.Run</c> — it disposes the old day's segment writer and then its
+    /// SQLite writer, and exposes no handle to await. Being able to open that day's database
+    /// exclusively is the observable end of it: the writer holds the file for its whole life,
+    /// so this succeeds only once it is gone.
+    ///
+    /// <para>
+    /// This replaced a fixed <c>await Task.Delay(200)</c> that every caller here used to make.
+    /// That bet held in isolation and lost under full-suite load, where the thread pool is
+    /// saturated and the seal task can be queued behind everything else — the seal was still
+    /// holding the day's <c>.db</c> when the test moved on and tried to delete or read it.
+    /// </para>
+    /// </summary>
+    public static async Task WaitForRolloverSealAsync(
+        string rootDirectory, string day, CancellationToken ct)
+    {
+        var dbPath = Path.Combine(rootDirectory, day, $"{day}.db");
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using (File.Open(dbPath, FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    return;
+                }
+            }
+            catch (IOException)
+            {
+                await Task.Delay(20, ct);
+            }
+        }
+
+        throw new TimeoutException($"The rollover seal for {day} did not release within 30s.");
+    }
+
     public static async Task<long> CountRowsAsync(string databasePath, CancellationToken ct)
     {
         // Pooling=False: these are throwaway assertion connections in a test that's about to
