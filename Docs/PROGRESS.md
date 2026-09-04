@@ -2339,6 +2339,47 @@ The app-level wiring is covered by the UI Automation check instead, both directi
 Release build shows no element named "Fake source" and no ASB/SQS buttons, and the same binary
 with `EVENTSCOPE_FAKE_SOURCE=1` brings the Fake source back.
 
+### Outcome — v0.5.0 shipped, and the install path is proven for a real upgrade
+
+Run [33889454850](https://github.com/sinh-r/EventPublisherConsumer/actions/runs/33889454850),
+conclusion `success`. Verified by downloading the published assets rather than trusting the run's
+logs, the same checks every release since `v0.3.0` has had:
+
+- `EventScope.exe` (122.89 MB) and `EventScope.exe.sha256` attached to the `v0.5.0` release, not
+  a draft, and `releases/latest` reports `v0.5.0`.
+- **Published hash** `4E35275A…D06D1757`.
+- **Provenance attestation resolves** for that digest — subject `EventScope.exe`, repository
+  `sinh-r/EventPublisherConsumer`, ref `refs/tags/v0.5.0`. Checked through the attestations API
+  directly, since the `gh` CLI is not installed on this machine.
+- **Stamped from the tagged commit** — `ProductVersion 0.5.0+551ae026`.
+
+**The upgrade path was exercised, not assumed**, which is the part no previous release could
+claim. The bucket was added as a real git remote (`file:///D:/My Work/scoop-EventScope`, since
+Scoop rejects a bare Windows path as a bucket URL) at a commit still pinning `v0.4.0`:
+
+1. `scoop install EventScope` → 0.4.0 from the bucket.
+2. Committed the `v0.5.0` bump; `scoop update` git-pulled the bucket and `scoop status` correctly
+   reported `0.4.0 → 0.5.0` available.
+3. `scoop update EventScope` downloaded the new release, **hash-checked it against the manifest**,
+   and relinked to 0.5.0.
+4. **`%LOCALAPPDATA%\EventScope` survived** — two day directories before, two after, which is
+   exactly what the manifest's own notes promise and had never been tested.
+
+**Then the installed `v0.5.0` was launched and inspected through UI Automation**, closing the loop
+on this pass end to end: no Mark-of-the-Web on the binary, no element named "Fake source", no
+Azure Service Bus or AWS SQS buttons, and both the `Kafka` and `Deep scan` controls present. The
+polished surface is what a Scoop user actually receives, verified on the artifact they receive it
+in.
+
+**Still unsigned**, and SmartScreen reputation is per-hash, so `v0.5.0` starts from zero like
+every release before it. The signing step in `release.yml` ran and reported the binary unsigned,
+as designed, because no token exists yet.
+
+**One local artifact to undo later:** the `eventscope` bucket currently points at
+`file:///D:/My Work/scoop-EventScope`. Once the GitHub repository exists, `scoop bucket rm
+eventscope` and re-add it from the real URL, so it tracks the published bucket rather than a
+folder on this machine.
+
 ---
 
 ## Pending — in build-plan order
