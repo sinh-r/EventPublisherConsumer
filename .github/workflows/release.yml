@@ -9,12 +9,20 @@
 #  2. Release artifacts are built here and only here. SignPath verifies binaries came from
 #     CI, so never build a release locally and upload it by hand.
 #
-# The SignPath signing step goes between "Upload unsigned artifact" and "Create release"
-# once the application is approved: submit a signing request referencing the uploaded
-# artifact, wait for it, download the signed binary back, and attach THAT to the release -
-# recomputing the SHA256 afterwards, because signing changes the hash. Check SignPath's
-# current documentation for the action name and inputs rather than assuming; they have
-# changed across versions.
+# The SignPath signing step is now present and inert. It runs only when the repository has a
+# SIGNPATH_API_TOKEN secret, so releases keep shipping unsigned until the SignPath Foundation
+# application is approved, and start shipping signed the moment the token is added - with no
+# workflow edit needed at that moment. See Docs/SIGNPATH_APPLICATION.md.
+#
+# Its position is load-bearing and narrower than "somewhere before Create release": signing
+# changes the file, so it must precede BOTH "Attest build provenance" and "Compute SHA256".
+# Sign after either one and the attestation covers a digest nobody can download, or the
+# published .sha256 does not match the published binary. Order is:
+#
+#     Publish -> Upload unsigned -> Sign -> Attest -> Compute SHA256 -> Create release
+#
+# The action reference and inputs below were read from SignPath's own action.yml rather than
+# recalled, and the secrets-in-`if` restriction from GitHub's context availability table.
 
 name: release
 
@@ -35,6 +43,14 @@ jobs:
     # test hang (Docs/PROGRESS.md's Blocked item 2) to one failed run instead of a silent
     # multi-hour one. Slightly higher than ci.yml's since this job also publishes and attests.
     timeout-minutes: 20
+
+    # Hoisted here because the `secrets` context is NOT available in a step-level `if` —
+    # confirmed against GitHub's context availability table, which lists only
+    # github/needs/strategy/matrix/job/runner/env/vars/steps/inputs there. `env` is, so this is
+    # how the signing step below can ask "do we have a token yet" at all.
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -76,11 +92,44 @@ jobs:
           }
           Get-Item publish/EventScope.exe | Select-Object Name, Length
 
+      # id: the signing step below needs this step's artifact-id output to tell SignPath which
+      # artifact to sign.
       - name: Upload unsigned artifact
+        id: unsigned
         uses: actions/upload-artifact@v7
         with:
           name: unsigned
           path: publish/EventScope.exe
+
+      # Inert until SIGNPATH_API_TOKEN exists (see the header). The organization id and slugs
+      # are repository *variables* rather than secrets - they are not sensitive, and keeping
+      # them out of `secrets` means a missing one fails loudly instead of silently expanding to
+      # an empty string. Downloads the signed binary back over publish/EventScope.exe, so every
+      # step after this one - attestation, hash, release - sees the signed file.
+      - name: Sign with SignPath
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: SignPath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: publish
+
+      # Reports whether this release is signed, so the run log answers the question without
+      # anyone having to inspect the binary. Get-AuthenticodeSignature is also what a user runs
+      # to check it themselves.
+      - name: Report signing status
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature publish/EventScope.exe
+          if ($sig.Status -eq 'Valid') {
+            Write-Host "Signed by: $($sig.SignerCertificate.Subject)"
+          } else {
+            Write-Host "UNSIGNED (Authenticode status: $($sig.Status)). Expected until SignPath approval lands."
+          }
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4

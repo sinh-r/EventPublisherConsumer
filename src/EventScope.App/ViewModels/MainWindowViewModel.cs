@@ -194,7 +194,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Settings = new SettingsViewModel(_settings, () => _sessionStore, () => _retentionService);
         Publisher = new PublisherViewModel(sinkProvider: () => _sink ??= EventSinkFactory.Create(SelectedTab?.Profile));
 
-        ConnectionManager = new ConnectionManagerViewModel(ConnectionStore.Load(), profiles => ConnectionStore.Save(profiles));
+        ConnectionManager = new ConnectionManagerViewModel(
+            ConnectionStore.Load(),
+            profiles => ConnectionStore.Save(profiles),
+            // Fully qualified: this class has a Settings property, which shadows the
+            // EventScope.App.Settings namespace at this call site.
+            includeFakeSource: EventScope.App.Settings.DeveloperOptions.ShowFakeSource);
 
         // Constructed after ConnectionManager so the saved-connection names it resolves capture
         // directories with are actually available to it.
@@ -217,12 +222,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _statsTimer.Tick += (_, _) => RefreshStats();
         _statsTimer.Start();
 
-        // Preserves this app's original zero-config behaviour: a fresh launch is immediately
-        // ready to stream the Fake source without the user ever touching the connection
-        // manager. EVENTSCOPE_MEASURE (see MainWindow.Measurement.cs) skips the launcher
-        // overlay entirely — an unattended measurement run must never sit behind a modal.
-        OpenOrSelectTab(ConnectionProfile.CreateFakeSource());
-        if (Environment.GetEnvironmentVariable("EVENTSCOPE_MEASURE") is null)
+        // Preserves this app's original zero-config behaviour where the Fake source is on show:
+        // a fresh launch is immediately ready to stream it without the user ever touching the
+        // connection manager. In a build handed to someone else that would mean opening onto a
+        // tab of invented traffic from a broker they never configured, so the tab goes with the
+        // list entry — see DeveloperOptions.ShowFakeSource, which stays true for measurement
+        // runs precisely because they depend on this tab. Every consumer of SelectedTab already
+        // handles there being no tab at all (see OpenOrSelectTab and CloseTab).
+        if (EventScope.App.Settings.DeveloperOptions.ShowFakeSource)
+        {
+            OpenOrSelectTab(ConnectionProfile.CreateFakeSource());
+        }
+
+        // EVENTSCOPE_MEASURE skips the launcher overlay entirely — an unattended measurement
+        // run must never sit behind a modal.
+        if (Environment.GetEnvironmentVariable(EventScope.App.Settings.DeveloperOptions.MeasureVariable) is null)
         {
             IsConnectionManagerOpen = true;
         }

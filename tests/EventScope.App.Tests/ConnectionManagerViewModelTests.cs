@@ -361,4 +361,41 @@ public sealed class ConnectionManagerViewModelTests
         Assert.Null(saved.StartOffset);
         Assert.Null(saved.StartTimestampUtc);
     }
+
+    /// <summary>
+    /// A build handed to someone else hides the Fake source: it is a synthetic stream dressed as
+    /// a saved connection, and to a new user it reads as real traffic from a broker they never
+    /// configured. <see cref="Settings.DeveloperOptions.ShowFakeSource"/> decides, and is false
+    /// in Release. Everything else about the list is unchanged — this is a display decision, not
+    /// a capability one, so the profile, its <c>ConnectionKind</c> and its event source all still
+    /// exist and still resolve.
+    /// </summary>
+    [Fact]
+    public void The_fake_source_can_be_left_out_without_disturbing_the_saved_connections()
+    {
+        var saved = new List<ConnectionProfile>
+        {
+            new() { Name = "prod", Kind = ConnectionKind.Kafka },
+            new() { Name = "staging", Kind = ConnectionKind.Kafka },
+        };
+
+        var log = new List<IReadOnlyList<ConnectionProfile>>();
+        var vm = new ConnectionManagerViewModel(
+            saved, profiles => log.Add(profiles), kafkaTester: null, timeProvider: null,
+            includeFakeSource: false);
+
+        Assert.DoesNotContain(vm.SavedConnections, c => c.Id == ConnectionProfile.FakeSourceId);
+        Assert.Equal(["prod", "staging"], vm.SavedConnections.Select(c => c.Name));
+    }
+
+    /// <summary>The default keeps every existing caller — and every other test in this file,
+    /// several of which index <c>SavedConnections[0]</c> expecting it — working untouched.</summary>
+    [Fact]
+    public void Omitting_the_flag_still_includes_the_fake_source()
+    {
+        var vm = Build(out _, initial: [new ConnectionProfile { Name = "prod", Kind = ConnectionKind.Kafka }]);
+
+        Assert.Equal(ConnectionProfile.FakeSourceId, vm.SavedConnections[0].Id);
+        Assert.Equal("prod", vm.SavedConnections[1].Name);
+    }
 }

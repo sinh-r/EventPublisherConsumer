@@ -846,22 +846,17 @@
                             <TextBlock Text="Add a connection" HorizontalAlignment="Center"
                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="13"
                                        Foreground="{DynamicResource Dim}" />
+                            <!-- Kafka only. The disabled Azure Service Bus and AWS SQS buttons
+                                 that used to sit here advertised two brokers that do not exist
+                                 yet - a greyed-out control promising a future milestone reads as
+                                 an unfinished product, not a roadmap. They come back when their
+                                 sources do, enabled. -->
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <Button Content="Kafka" Command="{Binding ConnectionManager.NewKafkaConnectionCommand}"
                                         Width="140" Height="72"
                                         Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Accent}"
                                         Foreground="{DynamicResource Accent}"
                                         FontFamily="{DynamicResource SansFontFamily}" FontSize="13" />
-                                <Button Content="Azure Service Bus" Width="140" Height="72" IsEnabled="False"
-                                        Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
-                                        Foreground="{DynamicResource Text}" Opacity="0.4"
-                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="13"
-                                        ToolTip.Tip="Available in a future milestone (M4)." />
-                                <Button Content="AWS SQS" Width="140" Height="72" IsEnabled="False"
-                                        Background="{DynamicResource Surf2}" BorderBrush="{DynamicResource Line}"
-                                        Foreground="{DynamicResource Text}" Opacity="0.4"
-                                        FontFamily="{DynamicResource SansFontFamily}" FontSize="13"
-                                        ToolTip.Tip="Available in a future milestone (M4)." />
                             </StackPanel>
                         </StackPanel>
                     </Grid>

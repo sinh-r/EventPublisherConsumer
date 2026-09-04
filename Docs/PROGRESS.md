@@ -2226,6 +2226,121 @@ release before it has.
 
 ---
 
+## Reach and polish — a build fit to hand to someone else (this pass)
+
+Four releases existed and **none of them was reachable without friction**. You chose to fix that
+before building more features, and to follow it with enough polish that the Kafka path can be
+handed to other people. Service Bus and SQS come after.
+
+### 1. The Scoop path is no longer theoretical
+
+The bucket at `D:\My Work\scoop-EventScope` had been prepared and never used. Three things were
+wrong with it, and none would have been caught without actually running it.
+
+- **Pinned to `v0.2.1`** — three releases stale. Now `v0.4.0`, with the hash taken from the
+  release's own published `EventScope.exe.sha256` rather than recomputed locally: the whole point
+  of that field is to match what GitHub serves.
+- **The description overclaimed** — "Cloud-agnostic event publisher and subscriber for Azure
+  Service Bus, AWS SQS and Kafka", when two of those three are empty `.csproj` files. It is the
+  first thing anyone reads in `scoop search`. Same line fixed in the bucket's README.
+- **`scoop install` had never been run by anyone.**
+
+**Now it has, end to end.** Scoop installed to `%USERPROFILE%\scoop`; installing from the
+manifest downloaded the real 122.9 MB asset from the GitHub release and reported
+*"Checking hash of EventScope.exe ... ok"* — which independently confirms the manifest hash
+matches the published binary. Shim, shortcut and notes all created correctly.
+
+- **No Mark-of-the-Web, confirmed directly**: the installed
+  `~\scoop\apps\EventScope\current\EventScope.exe` has no `Zone.Identifier` alternate data
+  stream at all — only `:$DATA`. That is the mechanism behind the no-prompt claim, checked rather
+  than asserted.
+- **It launches.** *The first time a published EventScope release binary has ever been run* —
+  every prior release note says "downloaded and inspected, not run". Window came up, stamped
+  `ProductVersion 0.4.0+391ab7ef…`, matching the tagged commit.
+- **The direct-download path was checked too**: downloaded `v0.4.0` from the release, recomputed
+  SHA256 — matches the published one — attached a real `Zone.Identifier` (`ZoneId=3`) the way a
+  browser delivers it, and launched it. No launch-time block on this machine.
+
+**What this still cannot prove.** SmartScreen's *download-time* "isn't commonly downloaded"
+prompt is a browser-side reputation verdict against a cloud service, keyed on the file hash. This
+machine has now seen and run that hash, so it cannot be a clean test of what a stranger sees. The
+Scoop path avoids the prompt *by construction* — no Mark-of-the-Web means nothing to prompt about
+— and that part is proven. The direct-download prompt can only be observed by someone
+downloading it fresh.
+
+### 2. Signing: everything that does not need the certificate
+
+- **`Docs/SIGNPATH_APPLICATION.md`** — the application, ready to paste, plus EventScope assessed
+  row by row against SignPath's actual published conditions (read from `signpath.org/terms.html`,
+  not recalled). Nine criteria; eight clear passes. Repository visibility was *verified* rather
+  than assumed: unauthenticated `api.github.com` calls against the repo return data, which only
+  works when it is public.
+- **One thing needs your decision before submitting**, recorded there: their "no proprietary,
+  non-open-source component" condition versus the three still-tracked Claude Design mockup files.
+  Low risk — none is compiled into the binary and the design content is yours — but the condition
+  is written strictly, and `support.js` was already untracked for exactly this reason. Cheapest
+  resolution is to gitignore `Mockup preparation from spec/` entirely.
+- **`release.yml` now carries the signing step**, inert until `SIGNPATH_API_TOKEN` exists, so
+  approval takes effect with no workflow edit at that moment.
+
+**Two things were looked up rather than written from memory**, which the workflow's own header had
+warned about:
+
+- The action is `SignPath/github-action-submit-signing-request@v2`, and its inputs were read from
+  its `action.yml`. It takes `github-artifact-id`, so the upload step needed an `id` to source
+  `steps.unsigned.outputs.artifact-id` from.
+- **The `secrets` context is not available in a step-level `if`.** Confirmed against GitHub's
+  context availability table, which lists only
+  `github/needs/strategy/matrix/job/runner/env/vars/steps/inputs` there. The token is therefore
+  hoisted to a job-level `env` and the step tests that. Written the obvious way, the gate would
+  have silently never fired.
+
+**A real ordering bug in the workflow's own guidance, fixed.** Its header said signing goes
+"between Upload unsigned artifact and Create release". That gap also contains `Attest build
+provenance` and `Compute SHA256`, both of which run against `publish/EventScope.exe`. Signing
+after either one would publish an attestation covering a digest nobody can download, or a
+`.sha256` that does not match the binary beside it. Correct order is now stated and implemented:
+publish → upload → **sign** → attest → hash → release. A `Report signing status` step prints the
+signer subject into the run log so the answer is in the run, not in the binary.
+
+### 3. Polish: removing what makes it look unfinished
+
+- **The Fake source is hidden outside Debug.** `DeveloperOptions.ShowFakeSource` decides;
+  `ConnectionManagerViewModel` gained an optional `includeFakeSource = true` so every existing
+  call site and test compiles untouched — the same additive shape `SegmentWriter`'s
+  `startingSegmentId` used at Stage 5d. `EVENTSCOPE_FAKE_SOURCE=1` brings it back, and
+  `EVENTSCOPE_MEASURE` implies it, because the measurement harness drives the Fake source
+  deliberately and runs in Release.
+- **Verifying it caught a second, more visible instance.** The list entry was the obvious one;
+  `MainWindowViewModel` *also* opened a Fake source **tab** at startup unconditionally, so a new
+  user's first screen was a tab of invented traffic from a broker they never configured. Found by
+  driving the built Release binary through UI Automation and finding "Fake source" still in the
+  tree after the first fix — not by reading the code, which had looked complete.
+- **The disabled Azure Service Bus and AWS SQS buttons are gone.** A greyed-out control promising
+  a future milestone reads as an unfinished product, not a roadmap.
+- **Internal jargon removed from user-visible strings** — the two "Available in a future
+  milestone (M4)" tooltips went with the buttons, and `EventSourceFactory`'s "see build plan M4"
+  became "EventScope currently connects to Kafka".
+- **README corrected on two counts**: the zero-setup instruction now says the Fake source is a
+  Debug affordance and names the escape hatch, and the connection-manager screenshot was
+  recaptured — the old one showed the two buttons that no longer exist. The first recapture was
+  thrown away for showing the Windows taskbar and a clipped window, the exact flaw the
+  distribution pass had fixed in the previous screenshots.
+
+### Tests — 326, up from 324
+
+Two new `ConnectionManagerViewModelTests`: the list omits the Fake source when told to and keeps
+saved connections in order, and the default still includes it — which is what keeps the other
+tests in that file, several of which index `SavedConnections[0]` expecting it, working untouched.
+
+**Deliberately not unit-tested: `DeveloperOptions` itself.** Its value depends on the build
+configuration, so a test asserting "false by default" would pass in Release and fail in Debug.
+The app-level wiring is covered by the UI Automation check instead, both directions: the default
+Release build shows no element named "Fake source" and no ASB/SQS buttons, and the same binary
+with `EVENTSCOPE_FAKE_SOURCE=1` brings the Fake source back.
+
+---
+
 ## Pending — in build-plan order
 
 - **Both of this list's former top items are done** — see Stage 5e above. `RetentionService` now
@@ -2263,10 +2378,21 @@ release before it has.
   strip, per-tab error state with Retry. Still pending: the ASB/SQS editor forms (blocked on
   M4's sources existing), deep-search overlay, large-payload confirmation, toast, light
   theme, full keyboard map.
-- **Release engineering — real code signing.** Repo prep, publish config and both CI
-  workflows are now done (see above); what remains is the SignPath Foundation application
-  and the signing step in `release.yml`, deliberately deferred until v0.1.0 ships at the
-  end of M1.
+- **Release engineering — real code signing, waiting on two human actions.** Everything
+  mechanical is done (see the reach-and-polish pass above): `release.yml` carries the signing
+  step, inert until the token exists, and `Docs/SIGNPATH_APPLICATION.md` holds the ready-to-paste
+  application with the eligibility assessment. What remains is **yours**: decide the mockup-files
+  question that doc raises, then submit at <https://signpath.org/apply>. Approval takes days to
+  weeks. Until it lands, direct downloads keep showing the SmartScreen prompt — Scoop users do
+  not.
+- **Push the Scoop bucket.** `D:\My Work\scoop-EventScope` is updated to `v0.4.0` with an honest
+  description and verified working (`scoop install` from the local manifest downloads, hash-checks
+  and launches). It still has **no remote**: creating `sinh-r/scoop-EventScope` on GitHub needs
+  an account action, and the `gh` CLI is not installed on this machine. Until it is pushed, the
+  install command in both READMEs points at a repository that does not exist.
+- **Bump the Scoop manifest after each release.** `excavator.yml` automates this once the bucket
+  is pushed, but that workflow's own header records that its action reference could not be
+  verified — run it via `workflow_dispatch` and check the commit before trusting the schedule.
 
 ---
 

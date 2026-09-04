@@ -12,9 +12,14 @@ and **AWS SQS**, without switching between three vendor consoles.
 > [`Docs/PROGRESS.md`](Docs/PROGRESS.md) has the full, honestly-kept status — including what
 > currently falls short of its own acceptance criteria.
 >
-> Try it with no setup at all: `dotnet run --project src/EventScope.App`, close the
-> connection dialog, and click **Start** to stream a synthetic feed. Or open that same
-> dialog and add a real Kafka connection.
+> Try it with no broker at all: `dotnet run --project src/EventScope.App`, close the
+> connection dialog, and click **Start** to stream a synthetic feed. That built-in **Fake
+> source** is a development affordance — it is present in Debug builds (which is what
+> `dotnet run` gives you) and hidden in the released binary, where a stream of invented
+> traffic would just be confusing. Set `EVENTSCOPE_FAKE_SOURCE=1` to bring it back in a
+> Release build.
+>
+> For real work, open that same dialog and add a Kafka connection.
 
 ## What it does today
 
@@ -62,7 +67,7 @@ and **AWS SQS**, without switching between three vendor consoles.
 
 **Connection manager** — add, test, and connect to a real Kafka broker with no config files.
 
-<img src="ScreenShots/connection-manager.png" alt="Connection manager showing the Fake source and buttons to add Kafka, Azure Service Bus, or AWS SQS connections">
+<img src="ScreenShots/connection-manager.png" alt="Connection manager showing a saved Kafka connection with Connect and Edit buttons, and a Kafka button to add another">
 
 </td><td width="50%">
 
@@ -182,9 +187,11 @@ at the next version.
 
 The real fix is code signing, through the [SignPath Foundation](https://signpath.org/)
 open-source programme — free OV-level certificates for open-source projects, verified against
-the public repository. It is planned but not yet applied for; see
-[`Docs/DISTRIBUTION_PLAN.md`](Docs/DISTRIBUTION_PLAN.md). Note that even once signed, trust
-accrues to the certificate over time rather than arriving instantly.
+the public repository. The release workflow is already wired for it: the signing step is
+present and stays inert until the API token exists, so approval takes effect without a
+workflow change. See [`Docs/SIGNPATH_APPLICATION.md`](Docs/SIGNPATH_APPLICATION.md) for the
+eligibility assessment and what is submitted. Note that even once signed, trust accrues to the
+certificate over time rather than arriving instantly.
 
 ## Documentation
 

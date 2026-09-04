@@ -31,8 +31,10 @@ public static class EventSourceFactory
         {
             ConnectionKind.Fake => new FakeEventSource(),
             ConnectionKind.Kafka => new KafkaEventSource(BuildKafkaSourceOptions(profile)),
+            // Reachable from a hand-edited connections.json naming a broker this build cannot
+            // open, so the message is written for whoever sees it rather than for us.
             _ => throw new NotSupportedException(
-                $"{profile.Kind} connections are not implemented yet — see build plan M4."),
+                $"{profile.Kind} connections are not supported yet. EventScope currently connects to Kafka."),
         };
     }
 

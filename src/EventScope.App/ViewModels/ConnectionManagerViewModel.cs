@@ -155,19 +155,29 @@ public partial class ConnectionManagerViewModel : ObservableObject
     public static IReadOnlyList<string> StartFromOptions { get; } =
         ["Latest", "Earliest", "Timestamp", "Offset"];
 
+    /// <param name="includeFakeSource">Whether to prepend the built-in "Fake source" entry.
+    /// Defaults to <see langword="true"/> so no existing caller has to think about it; the app
+    /// passes <see cref="Settings.DeveloperOptions.ShowFakeSource"/>, which is
+    /// <see langword="false"/> in a Release build. Only the list entry is affected — the profile
+    /// and its event source still exist and still resolve.</param>
     public ConnectionManagerViewModel(
         IReadOnlyList<ConnectionProfile> initialConnections,
         Action<IReadOnlyList<ConnectionProfile>> persist,
         Func<KafkaConnectionTestOptions, TimeSpan, KafkaConnectionTestResult>? kafkaTester = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool includeFakeSource = true)
     {
         _persist = persist;
         _kafkaTester = kafkaTester ?? ((options, timeout) => KafkaConnectionTester.Test(options, timeout));
         _timeProvider = timeProvider ?? TimeProvider.System;
 
-        // Always present, first, and never persisted (see Persist()'s own filter) — callers
-        // never need to remember to include it.
-        SavedConnections.Add(ConnectionProfile.CreateFakeSource());
+        // First when present, and never persisted (see Persist()'s own filter) — callers never
+        // need to remember to include it.
+        if (includeFakeSource)
+        {
+            SavedConnections.Add(ConnectionProfile.CreateFakeSource());
+        }
+
         foreach (var connection in initialConnections)
         {
             SavedConnections.Add(connection);
