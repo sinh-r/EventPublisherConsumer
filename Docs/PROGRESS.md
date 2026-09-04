@@ -2375,10 +2375,43 @@ in.
 every release before it. The signing step in `release.yml` ran and reported the binary unsigned,
 as designed, because no token exists yet.
 
-**One local artifact to undo later:** the `eventscope` bucket currently points at
-`file:///D:/My Work/scoop-EventScope`. Once the GitHub repository exists, `scoop bucket rm
-eventscope` and re-add it from the real URL, so it tracks the published bucket rather than a
-folder on this machine.
+---
+
+## The bucket needed no second repository (follow-up)
+
+You asked why a separate `scoop-EventScope` repo was needed. It wasn't. **A Scoop bucket is any
+git repository with a `bucket/` folder** — `Find-BucketDirectory` in Scoop's own
+`lib/buckets.ps1` uses `<repo>/bucket` when that directory exists and the repo root otherwise.
+That was read from the installed Scoop source rather than assumed. A dedicated repo is a
+convention, and presenting it as a requirement was wrong.
+
+**Now: `bucket/EventScope.json` lives in this repository**, and the install line is
+`scoop bucket add eventscope https://github.com/sinh-r/EventPublisherConsumer`. The trade-off,
+stated plainly: a `scoop bucket add` clones this repo (~58 MB of history) rather than a 30 KB
+bucket repo. That was the maintainer's call and the cost is one-time per user; refreshes are
+incremental pulls.
+
+**The other objection to a single repo turned out to be removable.** Manifest bumps landing on
+`main` would trigger `ci.yml` — a full build and test run to change a hash string. But GitHub
+does not start workflow runs for pushes made with the default `GITHUB_TOKEN` (confirmed against
+their docs, not recalled), so the release workflow can commit the bump itself with no CI noise
+and no recursion.
+
+`release.yml` gained **`Update the Scoop manifest on main`**, running last, after the release is
+published. It checks out `main` (the tag build is a detached HEAD), rewrites the three fields and
+pushes. This replaces the separate repo's `excavator.yml`, which is strictly better: no
+third-party action whose inputs that file's own header admitted were unverified, no schedule, and
+the bump is atomic with the release that changed the hash.
+
+**The rewrite is three targeted regexes, not a JSON round-trip**, which would reformat the whole
+file. Each is written so it cannot touch the `autoupdate` block — those URLs carry the literal
+placeholder `v$version` (no digit after the `v`, which the URL pattern requires) and that block's
+`hash` key holds an object rather than a 64-hex string. **Tested locally against the real
+manifest** with a fake version and hash: the three architecture fields changed, the `autoupdate`
+placeholders survived untouched, and the result still parses as JSON.
+
+`D:\My Work\scoop-EventScope` is now redundant. Left on disk and unpushed rather than deleted —
+it is outside this repository and not mine to remove.
 
 ---
 
@@ -2426,14 +2459,9 @@ folder on this machine.
   question that doc raises, then submit at <https://signpath.org/apply>. Approval takes days to
   weeks. Until it lands, direct downloads keep showing the SmartScreen prompt — Scoop users do
   not.
-- **Push the Scoop bucket.** `D:\My Work\scoop-EventScope` is updated to `v0.4.0` with an honest
-  description and verified working (`scoop install` from the local manifest downloads, hash-checks
-  and launches). It still has **no remote**: creating `sinh-r/scoop-EventScope` on GitHub needs
-  an account action, and the `gh` CLI is not installed on this machine. Until it is pushed, the
-  install command in both READMEs points at a repository that does not exist.
-- **Bump the Scoop manifest after each release.** `excavator.yml` automates this once the bucket
-  is pushed, but that workflow's own header records that its action reference could not be
-  verified — run it via `workflow_dispatch` and check the commit before trusting the schedule.
+- **The Scoop bucket needed no second repository, and no longer has one.** See the
+  single-repo-bucket entry above: `bucket/EventScope.json` lives here and `release.yml` keeps it
+  current. `D:\My Work\scoop-EventScope` is now redundant — left on disk, unpushed, not deleted.
 
 ---
 

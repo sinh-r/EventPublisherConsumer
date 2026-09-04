@@ -287,9 +287,18 @@ developers who already have Scoop.
 It does nothing for a user who clicks the `.exe` link on the Releases page, and
 nothing for Smart App Control.
 
-**Prepared and committed at `D:\My Work\scoop-EventScope`** (a local git repo with one
-commit, ready to push). What is actually there differs from the sketch below in four ways,
-each deliberate:
+> **Superseded on the repo layout, not on the content.** This phase originally called for a
+> second repository. It is now `bucket/EventScope.json` **in this repository** — Scoop treats
+> any git repo with a `bucket/` folder as a bucket (`Find-BucketDirectory` in Scoop's
+> `lib/buckets.ps1`, read directly rather than assumed), so a dedicated repo was a convention
+> and never a requirement. One repository was the maintainer's call; the trade-off is that a
+> `scoop bucket add` clones this repo rather than a 30 KB one.
+>
+> `excavator.yml` is not carried over. The release workflow updates the manifest itself on
+> every tag, which needs no third-party action and no schedule, and is atomic with the release
+> that changes the hash. Everything below about the manifest's *content* still holds.
+
+The four ways the manifest differs from the sketch below, each deliberate:
 
 - **`checkver` is `{"github": "<repo url>"}`**, not the bare string `"github"`. The bare form
   needs the manifest's `homepage` to be the repo; being explicit survives `homepage` changing.
@@ -304,13 +313,11 @@ each deliberate:
   `EventScope.exe`, so the rename fragment is noise — and it would corrupt any `$url`-derived
   path in the autoupdate block.
 
-The repo also carries `excavator.yml` to refresh the manifest automatically, flagged in its
-own header as using a third-party action whose current inputs could not be verified.
-
-- [x] Create a second repository named `scoop-EventScope`. *(Prepared locally; creating and
-      pushing the GitHub repo is yours — see the commands in that repo's README.)*
-- [x] Add `bucket/EventScope.json` — pinned to v0.2.1, hash
-      `21c326c5…9461ad`, verified by downloading the release asset and recomputing.
+- [x] ~~Create a second repository named `scoop-EventScope`.~~ **Not needed** — this repository
+      is its own bucket; see the note above.
+- [x] Add `bucket/EventScope.json` — tracks the current release, with the hash taken from the
+      release's own published `EventScope.exe.sha256` rather than recomputed locally, and kept
+      current by the `Update the Scoop manifest on main` step in `release.yml`.
 - [x] Add to the README install section. Scoop now leads the Install section, ahead of the
       direct download, since it is the path that avoids the prompt.
 - [ ] Test end to end on a clean machine or VM. **Not done — Scoop is not installed on the

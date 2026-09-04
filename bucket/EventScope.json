@@ -1,0 +1,48 @@
+{
+    "version": "0.5.0",
+    "description": "Desktop client for streaming, searching and publishing Kafka events, with bounded memory and on-disk capture. Azure Service Bus and AWS SQS are planned.",
+    "homepage": "https://github.com/sinh-r/EventPublisherConsumer",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/sinh-r/EventPublisherConsumer/releases/download/v0.5.0/EventScope.exe",
+            "hash": "4e35275a8e5c5af73898047fda34b7aee0daacf83fae79d31a22c792d06d1757"
+        }
+    },
+    "bin": "EventScope.exe",
+    "shortcuts": [
+        [
+            "EventScope.exe",
+            "EventScope"
+        ]
+    ],
+    "notes": [
+        "EventScope keeps everything it writes in %LOCALAPPDATA%\\EventScope - settings.json,",
+        "connections.json and sessions/. Nothing is written next to the executable, so",
+        "'scoop update' cannot lose your saved connections. That also means uninstalling does",
+        "not remove them; delete that folder by hand if you want them gone.",
+        "",
+        "Kafka is the broker this release connects to. Azure Service Bus and AWS SQS are",
+        "planned and not implemented yet.",
+        "",
+        "Releases are not yet code-signed. Every release is built by GitHub Actions from the",
+        "public repository and carries a build provenance attestation, which is a stronger",
+        "check than an unverified signature - if you have the GitHub CLI:",
+        "",
+        "  gh attestation verify (scoop prefix EventScope)\\EventScope.exe --repo sinh-r/EventPublisherConsumer"
+    ],
+    "checkver": {
+        "github": "https://github.com/sinh-r/EventPublisherConsumer"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/sinh-r/EventPublisherConsumer/releases/download/v$version/EventScope.exe"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/sinh-r/EventPublisherConsumer/releases/download/v$version/EventScope.exe.sha256",
+            "regex": "([a-fA-F0-9]{64})"
+        }
+    }
+}

@@ -91,9 +91,13 @@ and **AWS SQS**, without switching between three vendor consoles.
 ### Via Scoop (recommended)
 
 ```powershell
-scoop bucket add EventScope https://github.com/sinh-r/scoop-EventScope
+scoop bucket add eventscope https://github.com/sinh-r/EventPublisherConsumer
 scoop install EventScope
 ```
+
+Yes, that is this repository — Scoop treats any git repo with a `bucket/` folder as a bucket,
+so [`bucket/EventScope.json`](bucket/EventScope.json) lives here rather than in a second repo.
+The release workflow updates it on every tag, so it cannot drift from what is published.
 
 Scoop downloads through its own client rather than a browser, so the file never gets
 Mark-of-the-Web attached and the SmartScreen prompt below never appears. Scoop also verifies
