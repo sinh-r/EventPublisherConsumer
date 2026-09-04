@@ -2413,6 +2413,33 @@ placeholders survived untouched, and the result still parses as JSON.
 `D:\My Work\scoop-EventScope` is now redundant. Left on disk and unpushed rather than deleted —
 it is outside this repository and not mine to remove.
 
+### Verified against the live repository, as a user would
+
+The single-repo layout removed the prerequisite that was blocking this, so the *published*
+install path could finally be run rather than simulated. The local `file://` test bucket and the
+existing install were removed first, then exactly what the README now prints:
+
+```powershell
+scoop bucket add eventscope https://github.com/sinh-r/EventPublisherConsumer
+scoop install EventScope
+```
+
+- **The bucket resolved from GitHub** and Scoop reported `Manifests: 1`, confirming it found
+  `bucket/EventScope.json` in the `bucket/` subdirectory of an ordinary application repository.
+- **`scoop cache rm EventScope` first**, so this was a genuine download from the URL in the
+  pushed manifest rather than a cache hit — 122.9 MB, `Checking hash of EventScope.exe ... ok`.
+- **No Mark-of-the-Web** on the installed binary, stamped `0.5.0+551ae026` from the tagged commit.
+- **Launched and inspected**: no "Fake source", no Azure Service Bus or AWS SQS buttons, both
+  `Kafka` and `Deep scan` present.
+
+The install instructions in the README are now true. They were not before this change: they
+pointed at `sinh-r/scoop-EventScope`, which does not exist.
+
+**Not yet exercised: the automatic manifest bump.** `Update the Scoop manifest on main` has never
+run, because it only runs on a tag push and no tag has been cut since it was added. Its rewrite
+logic was tested locally against the real manifest, but the checkout/commit/push half is unproven
+until the next release. Watch that step on the `v0.6.0` run.
+
 ---
 
 ## Pending — in build-plan order
