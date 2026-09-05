@@ -139,8 +139,8 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) (the exact ver
 pinned in `global.json`).
 
 ```
-git clone https://github.com/rsrishabh007/EventScope.git
-cd EventScope
+git clone https://github.com/sinh-r/EventPublisherConsumer.git
+cd EventPublisherConsumer
 dotnet build EventScope.slnx
 ./build/Run-Tests.ps1
 ```

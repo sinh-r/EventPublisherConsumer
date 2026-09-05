@@ -14,8 +14,8 @@ code block below has been substituted accordingly.
 | Was | Value |
 |---|---|
 | `<APP_NAME>` | `EventScope` |
-| `<REPO_OWNER>` | `rsrishabh007` |
-| `<REPO_NAME>` | `EventScope` |
+| `<REPO_OWNER>` | `sinh-r` |
+| `<REPO_NAME>` | `EventPublisherConsumer` |
 | `<CSPROJ_PATH>` | `src/EventScope.App/EventScope.App.csproj` |
 | `<DOTNET_VERSION>` | `10.0.x` (SDK pinned to 10.0.400 in `global.json`) |
 | License | MIT |
@@ -137,7 +137,7 @@ the SignPath review.
   <AssemblyTitle>EventScope</AssemblyTitle>
   <Description>Cloud-agnostic event publisher and subscriber</Description>
   <Version>0.1.0</Version>
-  <RepositoryUrl>https://github.com/rsrishabh007/EventScope</RepositoryUrl>
+  <RepositoryUrl>https://github.com/sinh-r/EventPublisherConsumer</RepositoryUrl>
   <PackageLicenseExpression>MIT</PackageLicenseExpression>
 </PropertyGroup>
 ```

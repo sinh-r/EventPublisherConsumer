@@ -25,7 +25,7 @@
     <Authors>rsrishabh007</Authors>
     <Copyright>Copyright (c) 2026 rsrishabh007</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/rsrishabh007/EventScope</RepositoryUrl>
+    <RepositoryUrl>https://github.com/sinh-r/EventPublisherConsumer</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>

@@ -1640,6 +1640,11 @@ stamped into the shipped binary, and it is metadata the SignPath Foundation revi
 Left alone on the assumption that `rsrishabh007/EventScope` is the intended home; if
 `sinh-r/EventPublisherConsumer` is canonical, both need updating.
 
+> **Resolved in Stage 5f (v0.6.0).** `sinh-r/EventPublisherConsumer` is canonical.
+> `Directory.Build.props`, the README's clone command and `DISTRIBUTION_PLAN.md`'s
+> substitution table now all say so. `Company`/`Authors`/`Copyright` and `LICENSE` still read
+> `rsrishabh007` — those name the publisher, not the repository, and are a separate decision.
+
 ---
 
 ## Stage 5b — past events: history browsing and a Kafka start position
@@ -2534,6 +2539,21 @@ user would find that out, so the replay banner says it outright alongside where 
 
 The `--- Start position ---` tests were sitting inside `EventSinkFactoryTests` despite testing
 `EventSourceFactory`. Moved into `EventSourceFactoryTests` where they belong, unchanged.
+
+**The repository URL mismatch is settled.** Stage 5b surfaced it and left it open pending a
+decision: `origin` is `sinh-r/EventPublisherConsumer`, while `Directory.Build.props` stamped
+`rsrishabh007/EventScope` into every binary via `PublishRepositoryUrl=true` and the README told
+people to clone that. `sinh-r/EventPublisherConsumer` is canonical, so `Directory.Build.props`,
+the README clone command (URL *and* the `cd`, since the directory name differs too) and
+`DISTRIBUTION_PLAN.md`'s `<REPO_OWNER>`/`<REPO_NAME>` substitution table and assembly-metadata
+example now agree with it. That matters beyond tidiness: it is metadata the SignPath Foundation
+review reads, and it was pointing at a repository that is not this one.
+
+Deliberately **not** changed: `Company`, `Authors`, `Copyright` and `LICENSE` still read
+`rsrishabh007`. Those name the publisher, not the repository — the publisher name is what a
+signing certificate eventually asserts, so changing it is a separate decision, not a
+consequence of this one. `DISTRIBUTION_PLAN.md`'s Scoop block is untouched too; it is labelled
+"the original sketch, kept for reference" and is history rather than guidance.
 
 ---
 
