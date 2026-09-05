@@ -105,6 +105,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     public partial GridMode Mode { get; set; }
 
+    /// <summary>The replay-window picker's contents. Static: the presets never vary by
+    /// connection — whether the picker is shown at all is what varies, and that is
+    /// <see cref="ConnectionToolbarViewModel.SupportsReplay"/>'s job.</summary>
+    public static IReadOnlyList<StartWindow> StartWindowOptions => StartWindow.Presets;
+
+    /// <summary>What the running replay seeked back to, for the banner. Empty when the run
+    /// started at the connection's own position, which includes every ordinary tail.</summary>
+    [ObservableProperty]
+    public partial string ReplayDescription { get; set; } = string.Empty;
+
+    /// <summary>The replay banner is suppressed behind both of the row's other occupants: in
+    /// history mode the grid is not showing the replay at all, and a connection error is the more
+    /// urgent thing to say about a run that is failing.</summary>
+    public bool IsReplayBannerVisible =>
+        ReplayDescription.Length > 0 && !IsHistoryMode && !HasConnectionError;
+
+    partial void OnReplayDescriptionChanged(string value) => OnPropertyChanged(nameof(IsReplayBannerVisible));
+
     /// <summary>What the grid binds to. Both implementations virtualize; see
     /// <see cref="IGridRowsView"/> for why that is load-bearing rather than incidental.</summary>
     public IGridRowsView ActiveRows => Mode == GridMode.Live ? Rows : History.Rows;
@@ -118,6 +136,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         OnPropertyChanged(nameof(ActiveRows));
         OnPropertyChanged(nameof(IsHistoryMode));
+        OnPropertyChanged(nameof(IsReplayBannerVisible));
         RefreshStats();
     }
 
@@ -296,6 +315,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         SyncToolbarToTab(newValue);
         OnPropertyChanged(nameof(HasConnectionError));
         OnPropertyChanged(nameof(ConnectionErrorText));
+        OnPropertyChanged(nameof(IsReplayBannerVisible));
+
+        // Deliberately not folded into HandleTabSwitchAsync: that method returns early when the
+        // profile has not actually changed, whereas the toolbar has to be re-described for every
+        // selection — including re-selecting a tab whose picker was already populated.
+        _ = SyncReplayCapabilityAsync(newValue?.Profile);
 
         if (oldValue == newValue) return;
         _ = HandleTabSwitchAsync(newValue?.Profile.Id);
@@ -307,6 +332,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             OnPropertyChanged(nameof(HasConnectionError));
             OnPropertyChanged(nameof(ConnectionErrorText));
+            OnPropertyChanged(nameof(IsReplayBannerVisible));
         }
     }
 
@@ -316,6 +342,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Toolbar.ConnectionName = profile?.Name ?? string.Empty;
         Toolbar.TopicLabel = profile?.Kind == ConnectionKind.Kafka ? profile.Topics : string.Empty;
         Toolbar.PartitionLabel = profile?.Partition is { } p ? $"partition {p}" : string.Empty;
+    }
+
+    /// <summary>Shows or hides the replay-window picker for the newly selected tab. Opens no
+    /// connection — see <see cref="EventSourceFactory.CapabilitiesForAsync"/> — but is async all
+    /// the same so the probed source is disposed properly rather than abandoned.</summary>
+    private async Task SyncReplayCapabilityAsync(ConnectionProfile? profile)
+    {
+        var capabilities = await EventSourceFactory.CapabilitiesForAsync(profile).ConfigureAwait(true);
+        Toolbar.SupportsReplay = capabilities.SupportsReplay;
     }
 
     /// <summary>Stops whatever's currently running (if anything) and, only when the
@@ -412,6 +447,22 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         var profile = tab.Profile;
 
+        // Resolved here rather than when the picker changes, so "last 7 days" always means seven
+        // days back from the press — including across a Retry, which re-enters this method.
+        if (!StartWindow.TryResolve(
+                tab.SelectedStartWindow,
+                tab.CustomStartTimestampText,
+                TimeProvider.System,
+                out var startAtUtc,
+                out var windowError))
+        {
+            tab.StartWindowError = windowError;
+            Toolbar.StatusLabel = windowError;
+            return;
+        }
+
+        tab.StartWindowError = string.Empty;
+
         _sessionStore ??= new SessionStore(
             SessionRootDirectory(profile.Id),
             pinnedFields: _settings.PinnedFields.Select(f => new PinnedField(f.Name, f.JsonPath)).ToList());
@@ -421,7 +472,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IEventSource source;
         try
         {
-            source = EventSourceFactory.Create(profile);
+            source = EventSourceFactory.Create(profile, startAtUtc);
         }
         catch (NotSupportedException ex)
         {
@@ -430,6 +481,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             Toolbar.StatusLabel = ex.Message;
             return;
         }
+
+        ReplayDescription = startAtUtc is { } at
+            ? StartWindow.Describe(tab.SelectedStartWindow, at)
+            : string.Empty;
 
         Toolbar.CanPeekNonDestructively = source.Capabilities.CanPeekNonDestructively;
         Toolbar.SupportsPartitions = source.Capabilities.SupportsPartitions;
@@ -487,6 +542,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Toolbar.IsRunning = false;
         Toolbar.StatusLabel = "Idle";
         Toolbar.MessagesPerSecond = 0;
+        ReplayDescription = string.Empty;
 
         if (tab is not null && tab.Status != ConnectionTabStatus.Error)
         {

@@ -153,7 +153,46 @@
                                Foreground="{DynamicResource Muted}" />
                 </StackPanel>
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <!-- Replay window. Capability-bound like every other broker-specific control
+                         here (Toolbar.SupportsReplay, from SourceCapabilities) rather than a
+                         broker-type test, so it simply isn't there for the Fake source. Disabled
+                         while running because seeking is decided at Start: a picker that still
+                         looked live mid-run would imply it could move the stream, which it
+                         cannot. Bound through SelectedTab, so the selection is per connection
+                         and follows the tab strip with no sync code. -->
+                    <ComboBox ItemsSource="{Binding StartWindowOptions}"
+                              SelectedItem="{Binding SelectedTab.SelectedStartWindow}"
+                              IsVisible="{Binding Toolbar.SupportsReplay}"
+                              IsEnabled="{Binding !Toolbar.IsRunning}"
+                              MinWidth="150" Padding="10,3" VerticalAlignment="Center"
+                              Background="Transparent" BorderBrush="{DynamicResource Line}"
+                              Foreground="{DynamicResource Text}"
+                              FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                              ToolTip.Tip="How far back to start this run. Cannot reach past the topic's own Kafka retention.">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:CompileBindings="False">
+                                <TextBlock Text="{Binding Label}"
+                                           FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBox Text="{Binding SelectedTab.CustomStartTimestampText}"
+                             IsVisible="{Binding SelectedTab.IsCustomStartWindow}"
+                             IsEnabled="{Binding !Toolbar.IsRunning}"
+                             Watermark="yyyy-MM-dd HH:mm:ss UTC" Width="180" Padding="8,3"
+                             VerticalAlignment="Center"
+                             Background="{DynamicResource Bg}" BorderBrush="{DynamicResource Line}"
+                             Foreground="{DynamicResource Text}"
+                             FontFamily="{DynamicResource MonoFontFamily}" FontSize="12" />
+
+                    <TextBlock Text="{Binding SelectedTab.StartWindowError}"
+                               IsVisible="{Binding SelectedTab.HasStartWindowError}"
+                               VerticalAlignment="Center" MaxWidth="260" TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource Red}"
+                               FontFamily="{DynamicResource SansFontFamily}" FontSize="12" />
+
                     <Button Content="Start" Command="{Binding ToggleRunCommand}"
                             IsVisible="{Binding !Toolbar.IsRunning}"
                             Background="Transparent" BorderBrush="{DynamicResource Accent}"
@@ -234,6 +273,19 @@
                        VerticalAlignment="Center" Foreground="{DynamicResource Amber}"
                        FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5" />
         </Border>
+        <!-- Replay run. Says where the stream was seeked back to, and — the part a user cannot
+             otherwise find out — that the live ring holds only its newest 65,536 rows while
+             everything else has still been captured to disk. Declared before the error banner
+             so that if both ever applied, the error is the one that paints. -->
+        <Border Grid.Row="2" Height="36" Background="{DynamicResource AccentTint}"
+                BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,1" Padding="14,0"
+                IsVisible="{Binding IsReplayBannerVisible}">
+            <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                       Foreground="{DynamicResource Accent}"
+                       FontFamily="{DynamicResource SansFontFamily}" FontSize="12.5"
+                       Text="{Binding ReplayDescription, StringFormat='Replaying {0} — older messages first, then live traffic continues. The grid holds the newest 65,536 rows; all of it is written to disk and searchable.'}" />
+        </Border>
+
         <Border Grid.Row="2" Height="36" Background="{DynamicResource RedTint}"
                 BorderBrush="{DynamicResource Red}" BorderThickness="0,0,0,1" Padding="14,0"
                 IsVisible="{Binding HasConnectionError}">

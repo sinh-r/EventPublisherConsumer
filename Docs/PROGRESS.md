@@ -1640,6 +1640,11 @@ stamped into the shipped binary, and it is metadata the SignPath Foundation revi
 Left alone on the assumption that `rsrishabh007/EventScope` is the intended home; if
 `sinh-r/EventPublisherConsumer` is canonical, both need updating.
 
+> **Resolved in Stage 5f (v0.6.0).** `sinh-r/EventPublisherConsumer` is canonical.
+> `Directory.Build.props`, the README's clone command and `DISTRIBUTION_PLAN.md`'s
+> substitution table now all say so. `Company`/`Authors`/`Copyright` and `LICENSE` still read
+> `rsrishabh007` — those name the publisher, not the repository, and are a separate decision.
+
 ---
 
 ## Stage 5b — past events: history browsing and a Kafka start position
@@ -2439,6 +2444,116 @@ pointed at `sinh-r/scoop-EventScope`, which does not exist.
 run, because it only runs on a tag push and no tag has been cut since it was added. Its rewrite
 logic was tested locally against the real manifest, but the checkout/commit/push half is unproven
 until the next release. Watch that step on the `v0.6.0` run.
+
+---
+
+## Stage 5f — a replay window on the toolbar (this pass, ships as v0.6.0)
+
+Stage 5b put a start position on the **connection**; Stage 5c made the replayed half of the stream
+readable. What neither gave anyone was a way to *ask a question*: "what did this topic carry last
+week?" required opening the connection editor, typing an absolute UTC timestamp, running, and
+remembering to change it back. The mechanism was there; nothing reached it.
+
+This pass adds a replay window to the consumer toolbar — `Last 1 hour` / `6 hours` / `24 hours` /
+`7 days` / `14 days` / `30 days` / `Custom…` — that resolves to a moment and overrides the run's
+start position. **No changes to `EventScope.Brokers.Kafka` at all**: `KafkaStartFrom.Timestamp`,
+`KafkaStartOffsets.ResolveByTimestamp` and its per-partition `OffsetsForTimes` lookup already did
+the work, and Stage 5c already made the result readable. This is entirely App-layer plumbing to
+what was already built.
+
+**The run keeps tailing when it catches up.** There is deliberately no end boundary and no "replay
+complete" state — bounding the window at the far end would mean capturing high watermarks at start
+and tracking per-partition EOF, and the question people actually ask ("show me the last week, and
+keep going") does not need it. A replay is a normal live run that started earlier.
+
+### Three decisions worth recording
+
+1. **The selection lives on `ConnectionTabViewModel`, not on the toolbar.** The XAML binds through
+   `{Binding SelectedTab.SelectedStartWindow}`, so it follows the tab strip with no sync code at
+   all. The real reason is not tidiness: one shared field would carry "last 7 days" from one topic
+   to whatever tab you selected next, and the first sign of it would be a week of someone else's
+   traffic already replaying.
+2. **The first entry is `Connection default`, not "Live (now)".** A profile can already be saved
+   with `StartFrom = Earliest` or a timestamp of its own. An entry labelled "Live (now)" would
+   claim the untouched state tails from now, which for those profiles is simply false. The window
+   is never persisted back onto the profile either — it describes one run.
+3. **A future custom timestamp is refused rather than passed through.** The broker would not
+   complain: `OffsetsForTimes` answers with nothing and `KafkaStartOffsets` falls back to
+   `Offset.End`, so the run would look like it worked and show no backlog at all. Refusing in
+   `StartWindow.TryResolve` is the last point where the reason can still be given.
+
+### The override is applied before the offset guard, not after
+
+`BuildKafkaSourceOptions` has long refused `StartFrom = Offset` with no explicit partition —
+offsets are per-partition, so one number across a subscribed topic means a different message in
+each. A replay window replaces `Offset` with `Timestamp`, so that rule no longer describes the run
+being built. Applying the override *after* the guard would refuse a run the guard does not apply
+to. The saved offset is also dropped rather than carried along, so it cannot resurface later as a
+start position it was never meant to be. Both are asserted in `EventSourceFactoryTests`.
+
+### Capabilities had to be known before Start, not at Start
+
+Every broker-specific toolbar control here binds a `SourceCapabilities` flag rather than testing
+broker type, and the picker keeps that rule via `Toolbar.SupportsReplay`. But
+`CanPeekNonDestructively` and `SupportsPartitions` are set inside `Start()`, and a replay window
+has to be picked *before* the run it applies to. Hence
+`EventSourceFactory.CapabilitiesForAsync(profile)`, called on every tab selection: it constructs
+the source, reads its flags and disposes it, opening no connection — `KafkaEventSource`'s
+constructor only generates a group id and stores a delegate, and no librdkafka handle exists until
+its consume loop runs. A profile this build cannot open reports no capabilities rather than
+throwing, since deciding which controls apply must not be able to break tab selection.
+
+### Shared, so the two readings cannot drift
+
+The connection editor's start-timestamp parse moved to `Connections/StartTimestampFormat.cs`
+(same formats, invariant, `AssumeUniversal | AdjustToUniversal`), along with its error message.
+The editor and the toolbar's custom window now read a typed date identically; before, they would
+have been two copies free to disagree, and the only symptom would have been a run starting
+somewhere nobody asked for.
+
+### The banner says what the grid cannot
+
+`MessageRowsView` is a fixed 65,536-slot ring. A week of a busy topic overflows it — nothing is
+lost (it is all on disk, browsable through History and searchable), but there is nowhere else a
+user would find that out, so the replay banner says it outright alongside where the run seeked to.
+
+### Verified
+
+- **353 → 359 tests, all passing** via `build/Run-Tests.ps1`. New: `StartWindowTests` (preset
+  arithmetic against a fake clock, custom parsing, the future-timestamp refusal, picker order),
+  `ConnectionTabStartWindowTests` (per-tab independence, custom reveal, stale-error clearing), plus
+  the override and capability-probe cases in `EventSourceFactoryTests`.
+- **Driven through the real GUI** with `System.Windows.Automation`, the same technique used for the
+  M1c measurement session. Against a Debug build with a seeded Kafka profile: the picker is absent
+  on the Fake source tab (`SupportsReplay = false`) and appears on selecting the Kafka tab; all
+  eight entries render; `Custom…` reveals the timestamp input and hides it again; Start with a
+  blank timestamp refuses with the shared message and does not run; Start with `2026-08-29
+  14:03:00` streams and banners `Replaying since 2026-08-29 14:03 UTC`; `Last 7 days` at
+  09:04 UTC on 2026-09-05 banners `since 2026-08-29 09:04 UTC`.
+- **Not verified against a real broker.** No Kafka was available in this session, so that the
+  broker honours the seek across a live rebalance is still only covered by `KafkaStartOffsetsTests`
+  and the opt-in integration tests — the same limit `KafkaEventSource.ResolveStartOffsets`'
+  remarks already record.
+
+### Housekeeping found on the way
+
+The `--- Start position ---` tests were sitting inside `EventSinkFactoryTests` despite testing
+`EventSourceFactory`. Moved into `EventSourceFactoryTests` where they belong, unchanged.
+
+**The repository URL mismatch is settled.** Stage 5b surfaced it and left it open pending a
+decision: `origin` is `sinh-r/EventPublisherConsumer`, while `Directory.Build.props` stamped
+`rsrishabh007/EventScope` into every binary via `PublishRepositoryUrl=true` and the README told
+people to clone that. `sinh-r/EventPublisherConsumer` is canonical, so `Directory.Build.props`,
+the README clone command (URL *and* the `cd`, since the directory name differs too) and
+`DISTRIBUTION_PLAN.md`'s `<REPO_OWNER>`/`<REPO_NAME>` substitution table and assembly-metadata
+example now agree with it. That matters beyond tidiness: it is metadata the SignPath Foundation
+review reads, and it was pointing at a repository that is not this one.
+
+Deliberately **not** changed: `Company`, `Authors`, `Copyright` and `LICENSE` still read
+`rsrishabh007`. Those name the publisher, not the repository — the publisher name is what a
+signing certificate eventually asserts, so changing it is a separate decision, not a
+consequence of this one. `DISTRIBUTION_PLAN.md`'s Scoop block is untouched too; it is labelled
+"the original sketch, kept for reference" and is history rather than guidance.
 
 ---
 
