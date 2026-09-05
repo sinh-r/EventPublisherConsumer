@@ -1,12 +1,12 @@
 {
-    "version": "0.5.0",
+    "version": "0.6.0",
     "description": "Desktop client for streaming, searching and publishing Kafka events, with bounded memory and on-disk capture. Azure Service Bus and AWS SQS are planned.",
     "homepage": "https://github.com/sinh-r/EventPublisherConsumer",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/sinh-r/EventPublisherConsumer/releases/download/v0.5.0/EventScope.exe",
-            "hash": "4e35275a8e5c5af73898047fda34b7aee0daacf83fae79d31a22c792d06d1757"
+            "url": "https://github.com/sinh-r/EventPublisherConsumer/releases/download/v0.6.0/EventScope.exe",
+            "hash": "6f94e803254f5bfa2079e851643a827dd75bea7ab354cae9543421fcc8bb1c96"
         }
     },
     "bin": "EventScope.exe",
