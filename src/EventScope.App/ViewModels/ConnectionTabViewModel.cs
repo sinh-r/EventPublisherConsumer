@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using EventScope.App.Connections;
+using EventScope.App.Ingest;
 
 namespace EventScope.App.ViewModels;
 
@@ -58,6 +59,47 @@ public partial class ConnectionTabViewModel : ObservableObject
     /// drives the warning banner's "broker error text" (UI spec §10's Error state).</summary>
     [ObservableProperty]
     public partial string? ErrorText { get; set; }
+
+    /// <summary>
+    /// How far back the next run on this tab should seek before streaming forward.
+    ///
+    /// <para>
+    /// Per tab rather than one shared toolbar field, and not merely for tidiness: a single shared
+    /// selection would carry "last 7 days" from one topic to the next tab the user selected, and
+    /// the first sign of it would be a week of someone else's traffic already replaying. It is
+    /// also deliberately <em>not</em> persisted onto <see cref="ConnectionProfile"/> — a replay
+    /// window describes one run, not the connection.
+    /// </para>
+    /// </summary>
+    [ObservableProperty]
+    public partial StartWindow SelectedStartWindow { get; set; } = StartWindow.ConnectionDefault;
+
+    /// <summary>UTC, <c>yyyy-MM-dd HH:mm:ss</c>. Only read when
+    /// <see cref="SelectedStartWindow"/> is <see cref="StartWindow.Custom"/>.</summary>
+    [ObservableProperty]
+    public partial string CustomStartTimestampText { get; set; } = string.Empty;
+
+    /// <summary>Why the picked window could not be used, shown beside the picker. Cleared on
+    /// every successful Start.</summary>
+    [ObservableProperty]
+    public partial string StartWindowError { get; set; } = string.Empty;
+
+    /// <summary>Reveals the absolute-timestamp input. A plain derived bool, matching
+    /// <see cref="IsIdle"/> and friends above rather than introducing a converter.</summary>
+    public bool IsCustomStartWindow => SelectedStartWindow.IsCustom;
+
+    public bool HasStartWindowError => StartWindowError.Length > 0;
+
+    partial void OnSelectedStartWindowChanged(StartWindow value)
+    {
+        OnPropertyChanged(nameof(IsCustomStartWindow));
+
+        // A stale complaint about the previous selection would otherwise sit next to a picker that
+        // no longer has anything wrong with it.
+        StartWindowError = string.Empty;
+    }
+
+    partial void OnStartWindowErrorChanged(string value) => OnPropertyChanged(nameof(HasStartWindowError));
 
     public ConnectionTabViewModel(ConnectionProfile profile)
     {

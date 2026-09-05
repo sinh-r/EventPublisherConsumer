@@ -39,6 +39,12 @@ and **AWS SQS**, without switching between three vendor consoles.
   on a chosen partition — so the messages that arrived before you opened the tool are not lost to
   you. Still non-destructive: the throwaway group and disabled auto-commit mean reading a backlog
   never touches a real consumer group.
+- **"What did this topic carry last week?"** A replay window in the consumer toolbar — last hour,
+  6 hours, 24 hours, 7, 14 or 30 days, or a timestamp you type — seeks the topic back that far and
+  streams forward, then carries straight on into live traffic without stopping. It applies to one
+  run and never edits the saved connection, so you do not have to remember to change it back. It
+  cannot reach further back than the topic's own Kafka retention: asking for 30 days on a topic
+  that keeps 3 gives you 3.
 - **Search that works on volume.** Instant filtering of what is already on screen, full-text
   search over message bodies (FTS5), and a cancellable deep scan that reads every body on disk
   with live progress — for the things an index structurally cannot answer: a term past the

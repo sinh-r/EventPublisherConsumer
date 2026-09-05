@@ -24,6 +24,14 @@ public partial class ConnectionToolbarViewModel : ObservableObject
     [ObservableProperty]
     public partial bool SupportsPartitions { get; set; }
 
+    /// <summary>Whether this connection can start anywhere but the tail — drives the
+    /// replay-window picker's visibility. Unlike the two flags above it is set the moment a tab
+    /// is selected (via <see cref="EventScope.App.Ingest.EventSourceFactory.CapabilitiesForAsync"/>)
+    /// rather than at Start, because the window has to be picked <em>before</em> the run it
+    /// applies to.</summary>
+    [ObservableProperty]
+    public partial bool SupportsReplay { get; set; }
+
     [ObservableProperty]
     public partial double MessagesPerSecond { get; set; }
 

@@ -20,7 +20,7 @@
     Version is bumped here, in one place, per release tag.
   -->
   <PropertyGroup>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <Company>rsrishabh007</Company>
     <Authors>rsrishabh007</Authors>
     <Copyright>Copyright (c) 2026 rsrishabh007</Copyright>

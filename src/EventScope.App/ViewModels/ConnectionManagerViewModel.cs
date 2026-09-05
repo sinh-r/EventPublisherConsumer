@@ -363,16 +363,11 @@ public partial class ConnectionManagerViewModel : ObservableObject
 
     private void Persist() => _persist(SavedConnections.Where(c => c.Id != ConnectionProfile.FakeSourceId).ToList());
 
-    /// <summary>Parses the start timestamp as UTC. Invariant and exact rather than
-    /// locale-dependent: a start position that means a different moment on a differently-configured
-    /// machine is worse than one that refuses an ambiguous input.</summary>
+    /// <summary>Parses the start timestamp as UTC. The reading itself lives in
+    /// <see cref="StartTimestampFormat"/> so this form and the toolbar's custom replay window
+    /// cannot come to disagree about what a typed date means.</summary>
     private bool TryParseStartTimestamp(out DateTime value) =>
-        DateTime.TryParseExact(
-            EditStartTimestampText?.Trim(),
-            ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"],
-            System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
-            out value);
+        StartTimestampFormat.TryParseUtc(EditStartTimestampText, out value);
 
     private bool TryValidate(out string error)
     {
@@ -402,7 +397,7 @@ public partial class ConnectionManagerViewModel : ObservableObject
 
         if (IsStartFromTimestamp && !TryParseStartTimestamp(out _))
         {
-            error = "Start timestamp must be UTC in the form yyyy-MM-dd HH:mm:ss.";
+            error = StartTimestampFormat.Requirement;
             return false;
         }
 
